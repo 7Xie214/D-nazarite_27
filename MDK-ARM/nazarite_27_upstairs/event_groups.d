@@ -1,0 +1,15 @@
+nazarite_27_upstairs\event_groups.o: ../Middlewares/Third_Party/FreeRTOS/Source/event_groups.c
+nazarite_27_upstairs\event_groups.o: D:\keil5\ARM\ARMCC\Bin\..\include\stdlib.h
+nazarite_27_upstairs\event_groups.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/FreeRTOS.h
+nazarite_27_upstairs\event_groups.o: D:\keil5\ARM\ARMCC\Bin\..\include\stddef.h
+nazarite_27_upstairs\event_groups.o: D:\keil5\ARM\ARMCC\Bin\..\include\stdint.h
+nazarite_27_upstairs\event_groups.o: ../Core/Inc/FreeRTOSConfig.h
+nazarite_27_upstairs\event_groups.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/projdefs.h
+nazarite_27_upstairs\event_groups.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/portable.h
+nazarite_27_upstairs\event_groups.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/deprecated_definitions.h
+nazarite_27_upstairs\event_groups.o: ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F/portmacro.h
+nazarite_27_upstairs\event_groups.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/mpu_wrappers.h
+nazarite_27_upstairs\event_groups.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/task.h
+nazarite_27_upstairs\event_groups.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/list.h
+nazarite_27_upstairs\event_groups.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/timers.h
+nazarite_27_upstairs\event_groups.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/event_groups.h

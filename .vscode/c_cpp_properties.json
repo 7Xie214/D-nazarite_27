@@ -1,0 +1,62 @@
+{
+    "version": 4,
+    "configurations": [
+        {
+            "name": "Keil-STM32H723",
+            "compilerPath": "D:/keil5/ARM/ARMCLANG/bin/armclang.exe",
+            "compilerArgs": [
+                "--target=arm-arm-none-eabi",
+                "-mcpu=cortex-m7",
+                "-mfpu=fpv5-d16",
+                "-mfloat-abi=hard"
+            ],
+            "intelliSenseMode": "windows-clang-arm",
+            "cStandard": "c99",
+            "cppStandard": "c++11",
+            "defines": [
+                "USE_PWR_LDO_SUPPLY",
+                "USE_HAL_DRIVER",
+                "STM32H723xx"
+            ],
+            "includePath": [
+                "${workspaceFolder}/Chassis/Inc",
+                "${workspaceFolder}/Device/Inc",
+                "${workspaceFolder}/algorithm/Inc",
+                "${workspaceFolder}/Task/Inc",
+                "${workspaceFolder}/APP/Inc",
+                "${workspaceFolder}/Core/Inc",
+                "${workspaceFolder}/BSP/Inc",
+                "${workspaceFolder}/Drivers/STM32H7xx_HAL_Driver/Inc",
+                "${workspaceFolder}/Drivers/STM32H7xx_HAL_Driver/Inc/Legacy",
+                "${workspaceFolder}/Drivers/CMSIS/Device/ST/STM32H7xx/Include",
+                "${workspaceFolder}/Drivers/CMSIS/Include",
+                "${workspaceFolder}/Drivers/CMSIS/RTOS2/Include",
+                "${workspaceFolder}/Middlewares/Third_Party/FreeRTOS/Source/include",
+                "${workspaceFolder}/Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2",
+                "${workspaceFolder}/Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F"
+            ],
+            "browse": {
+                "path": [
+                    "${workspaceFolder}/Chassis/Inc",
+                    "${workspaceFolder}/Chassis/Src",
+                    "${workspaceFolder}/Device/Inc",
+                    "${workspaceFolder}/Device/Src",
+                    "${workspaceFolder}/algorithm/Src",
+                    "${workspaceFolder}/algorithm/Inc",
+                    "${workspaceFolder}/Task/Inc",
+                    "${workspaceFolder}/Task/Src",
+                    "${workspaceFolder}/APP/Inc",
+                    "${workspaceFolder}/APP/Src",
+                    "${workspaceFolder}/Core/Inc",
+                    "${workspaceFolder}/BSP/Inc",
+                    "${workspaceFolder}/BSP/Src",
+                    "${workspaceFolder}/Drivers/STM32H7xx_HAL_Driver/Inc",
+                    "${workspaceFolder}/Drivers/CMSIS/Device/ST/STM32H7xx/Include",
+                    "${workspaceFolder}/Drivers/CMSIS/Include",
+                    "${workspaceFolder}/Middlewares/Third_Party/FreeRTOS/Source/include"
+                ],
+                "limitSymbolsToIncludedHeaders": true
+            }
+        }
+    ]
+}
