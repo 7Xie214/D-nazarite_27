@@ -51,4 +51,8 @@ nazarite_27_upstairs\main.o: ../Core/Inc/fdcan.h
 nazarite_27_upstairs\main.o: ../Core/Inc/usart.h
 nazarite_27_upstairs\main.o: ../Core/Inc/gpio.h
 nazarite_27_upstairs\main.o: ../BSP/Inc/My_CAN.h
-nazarite_27_upstairs\main.o: ../BSP/Inc/My_USART.h
+nazarite_27_upstairs\main.o: ../Chassis/Inc/Chassis.h
+nazarite_27_upstairs\main.o: ../Chassis/Inc/Chassis_Conf.h
+nazarite_27_upstairs\main.o: ../Chassis/Inc/Swerve.h
+nazarite_27_upstairs\main.o: ../Device/Inc/DjiMotor.h
+nazarite_27_upstairs\main.o: ../Test/Inc/Motor_Test.h

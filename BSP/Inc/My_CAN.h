@@ -13,6 +13,19 @@ typedef struct {
     uint16_t mask;
 } CAN_Filter_t;
 
+/* CAN1/2/3 的故障记录。有效 LEC 为 1~6，0/7 不覆盖历史错误。 */
+typedef struct {
+    uint32_t first_error_code;
+    uint32_t last_error_code;
+    uint32_t bus_off_count;
+    uint32_t last_psr;
+    uint32_t last_ecr;
+    uint32_t error_record_count;  /* 有效错误快照次数，不等同于坏帧数 */
+    uint32_t last_error_tick_ms;  /* 最后有效错误快照的HAL时间 */
+} BSP_CAN_Diagnostics_t;
+
+extern volatile BSP_CAN_Diagnostics_t g_can_diagnostics[3];
+
 /* 初始化：配置全局滤波器 → 写入滤波器列表 → 开中断 → 启动
  * filters/count 为 0 时表示不装任何滤波器（此时全局滤波器会拒收全部） */
 HAL_StatusTypeDef BSP_CAN_Init(FDCAN_HandleTypeDef *hfdcan,

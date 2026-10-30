@@ -3,6 +3,8 @@
         {
             "name": "nazarite_27_upstairs",
             "includePath": [
+                "d:\\nazarite_27\\nazarite_27_upstairs\\Test\\Inc",
+                "d:\\nazarite_27\\nazarite_27_upstairs\\Test\\Src",
                 "d:\\nazarite_27\\nazarite_27_upstairs\\Chassis\\Inc",
                 "d:\\nazarite_27\\nazarite_27_upstairs\\Chassis\\Src",
                 "d:\\nazarite_27\\nazarite_27_upstairs\\Core\\Inc",

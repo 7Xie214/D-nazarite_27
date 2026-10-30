@@ -1,8 +1,8 @@
 nazarite_27_upstairs\my_task.o: ../Task/Src/My_task.c
 nazarite_27_upstairs\my_task.o: ../Task/Inc/My_task.h
+nazarite_27_upstairs\my_task.o: D:\keil5\ARM\ARMCC\Bin\..\include\stdint.h
 nazarite_27_upstairs\my_task.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/FreeRTOS.h
 nazarite_27_upstairs\my_task.o: D:\keil5\ARM\ARMCC\Bin\..\include\stddef.h
-nazarite_27_upstairs\my_task.o: D:\keil5\ARM\ARMCC\Bin\..\include\stdint.h
 nazarite_27_upstairs\my_task.o: ../Core/Inc/FreeRTOSConfig.h
 nazarite_27_upstairs\my_task.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/projdefs.h
 nazarite_27_upstairs\my_task.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/portable.h

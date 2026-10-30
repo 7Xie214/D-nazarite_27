@@ -28,7 +28,9 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "My_CAN.h"
-#include "My_USART.h"
+#include "Chassis.h"
+#include "DjiMotor.h"
+#include "Motor_Test.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -38,6 +40,9 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+
+/* 1：裸机直接输出测试（3508 电流 / GM6020 电压）；0：正常启动 RTOS。 */
+#define MOTOR_CURRENT_TEST_ONLY 0
 
 /* USER CODE END PD */
 
@@ -50,13 +55,32 @@
 
 /* USER CODE BEGIN PV */
 
+/* 电机测试观察量：Keil Watch 中查看；HAL_OK 仅表示已入发送队列。 */
+volatile HAL_StatusTypeDef g_test_can_init_status[3] = {HAL_ERROR, HAL_ERROR, HAL_ERROR};
+volatile HAL_StatusTypeDef g_test_motor_send_status = HAL_ERROR;
+volatile uint32_t g_test_motor_send_count;
+FDCAN_ProtocolStatusTypeDef g_test_can1_protocol;
+FDCAN_ErrorCountersTypeDef g_test_can1_counters;
+
 /* 关心哪些 CAN 报文 ID —— 这是应用层的事，BSP 不该管 */
 static const CAN_Filter_t can1_filter[] = {
-    { 0x201, 0x7FF },   /* 电机1 反馈 */
-    { 0x202, 0x7FF },   /* 电机2 反馈 */
-    { 0x203, 0x7FF },   /* 电机3 反馈 */
-    { 0x204, 0x7FF },   /* 电机4 反馈 */
-    { 0x205, 0x7FF },   /* 电机5 反馈 */
+    { 0x201, 0x7FF },   /* 左前 3508 ID1 */
+    { 0x202, 0x7FF },   /* 左后 3508 ID2 */
+    { 0x205, 0x7FF },   /* 左前 6020 ID1 */
+    { 0x206, 0x7FF },   /* 左后 6020 ID2 */
+};
+static const CAN_Filter_t can2_filter[] = {
+    { 0x203, 0x7FF },   /* 右后 3508 ID3 */
+    { 0x204, 0x7FF },   /* 右前 3508 ID4 */
+    { 0x207, 0x7FF },   /* 右后 6020 ID3 */
+    { 0x208, 0x7FF },   /* 右前 6020 ID4 */
+};
+static const CAN_Filter_t can3_filter[] = {
+    { 0x201, 0x7FF },   /* 上层 3508_3 ID1 */
+    { 0x202, 0x7FF },   /* 上层 3508_2 ID2 */
+    { 0x203, 0x7FF },   /* 上层 2006_2 ID3 */
+    { 0x204, 0x7FF },   /* 上层 2006_1 ID4 */
+    { 0x205, 0x7FF },   /* 上层 3508_1 ID5 */
 };
 /* 漏一个 ID 的现象是「那台电机读数一直是 0」—— 不是报错，是滤波器把它
  * 挡在门外了。电机清单改了（DjiMotor_Init）这张表要跟着改。 */
@@ -127,18 +151,37 @@ int main(void)
   MX_USART10_UART_Init();
   /* USER CODE BEGIN 2 */
 
+  /* Register all 13 motors before CAN interrupts can deliver feedback. */
+  DjiMotor_Init();
+
   /* CAN 必须在 MX_FDCANx_Init() 之后才能启动：
    * ConfigGlobalFilter / Start 都要求外设状态为 READY，
    * 而在这里 FDCAN 的时钟和 Message RAM 才刚配好 */
-  BSP_CAN_Init(&hfdcan1, can1_filter,
+  g_test_can_init_status[0] = BSP_CAN_Init(&hfdcan1, can1_filter,
                sizeof(can1_filter) / sizeof(can1_filter[0]));
-  BSP_USART_Init(&huart10);
-  /* 控制参数不在这里配 —— 控制器实例跟着「轴」走，由 MotorApp_Init() 在
-   * 控制任务开头按型号套上去（见 APP/Src/MotorApp.c）。
-   * CAN2 / CAN3 目前没接电机，也就没调 BSP_CAN_Init —— 只调 MX_FDCANx_Init
-   * 的话外设没有 Start，收不到任何东西。要往 CAN2 上挂电机时在这里补：
-   *     BSP_CAN_Init(&hfdcan2, can2_filter, ...);
+  g_test_can_init_status[1] = BSP_CAN_Init(&hfdcan2, can2_filter,
+               sizeof(can2_filter) / sizeof(can2_filter[0]));
+  g_test_can_init_status[2] = BSP_CAN_Init(&hfdcan3, can3_filter,
+               sizeof(can3_filter) / sizeof(can3_filter[0]));
+  /* 串口 BSP 创建 RTOS 信号量，由通信任务在调度器启动后初始化。
+   * 裸机电流测试不能创建 RTOS 对象，否则 BASEPRI 会屏蔽 HAL tick。 */
+  Chassis_Init();
+  /* 控制参数由各自任务入口的 MotorApp_Init()/ChassisApp_Init() 加载。
+   * CAN1/2 对应底盘 8 台，CAN3 对应上层 5 台，三路均已启动。
    */
+
+#if MOTOR_CURRENT_TEST_ONLY
+  /* GM6020 电压开环测试：左前 CAN1 ID1，测试期间不启动控制任务。
+   * 3508/2006 测试改用 Test_MotorCurrent()。 */
+  for (;;) {
+    g_test_motor_send_status = Test_MotorCurrent(&hfdcan3, 3, -2000);
+    g_test_motor_send_status = Test_MotorCurrent(&hfdcan3, 4, 2000);
+    g_test_motor_send_count++;
+    HAL_Delay(10);
+    (void)HAL_FDCAN_GetProtocolStatus(&hfdcan1, &g_test_can1_protocol);
+    (void)HAL_FDCAN_GetErrorCounters(&hfdcan1, &g_test_can1_counters);
+  }
+#else
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -158,6 +201,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
   }
+#endif /* MOTOR_CURRENT_TEST_ONLY */
   /* USER CODE END 3 */
 }
 

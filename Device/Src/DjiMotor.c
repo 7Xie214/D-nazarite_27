@@ -2,23 +2,21 @@
  * 大疆电机驱动实现。
  *
  * 分四层：
- *   ① 注册表      按 (总线, id) 找电机
+ *   ① 注册表      按 (总线, 反馈 ID) 找电机
  *   ② OnCanFrame  中断里：存 raw + 记时间戳
  *   ③ Update      任务里：角度累计 + 工程量换算
- *   ④ SendGroup   任务里：打包成 0x200 / 0x1FF 发出去
+ *   ④ SendGroup   任务里：打包成 0x200 / 0x1FF / 0x2FF 发出去
  *
- * ① 不知道协议，② 不做数学，③ 不发报文，④ 不碰状态。各管一段。
+ *   GM6020 采用电压控制，cmd 为 ±30000 的电压给定值。
  */
 
 #include "DjiMotor.h"
 #include "My_CAN.h"
+#include "Encoder_Test.h"
 #include "fdcan.h"          /* hfdcan1 */
 
-#include "FreeRTOS.h"
-#include "cmsis_os2.h"      /* osKernelGetTickCount */
-
 /* ========================= 型号参数表 =========================
- * 加新型号在这里加一条，别的地方不用动。
+ * 帧内布局相同的型号通过下表配置 CAN ID 和工程量。
  *
  * ⚠️ nm_per_raw 我填的是 0（= 不换算，torque_nm 恒为 0）。
  *    这个系数跟 C620/C610 的固件版本走，各批次不一样，我给不出可靠值 ——
@@ -29,6 +27,9 @@ const DjiMotor_Model_t DJI_MODEL_3508 = {
     .gear_ratio = 3591.0f / 187.0f,     /* ≈ 19.203 */
     .cmd_max    = 16384,                /* C620 的量程 */
     .nm_per_raw = 0.0f,                 /* TODO: 标定后填 */
+    .feedback_base = 0x200u,
+    .command_id = {0x200u, 0x1FFu},
+    .max_id = 8u,
 };
 
 const DjiMotor_Model_t DJI_MODEL_2006 = {
@@ -36,36 +37,49 @@ const DjiMotor_Model_t DJI_MODEL_2006 = {
     .gear_ratio = 36.0f,
     .cmd_max    = 10000,                /* C610 的量程，比 C620 小 */
     .nm_per_raw = 0.0f,                 /* TODO: 标定后填 */
+    .feedback_base = 0x200u,
+    .command_id = {0x200u, 0x1FFu},
+    .max_id = 8u,
+};
+
+const DjiMotor_Model_t DJI_MODEL_6020 = {
+    .name       = "GM6020",
+    .gear_ratio = 1.0f,                 /* 电机本体无减速箱 */
+    .cmd_max    = 30000,                /* 电压给定，不是电流给定 */
+    .nm_per_raw = 0.0f,
+    .feedback_base = 0x204u,
+    .command_id = {0x1FFu, 0x2FFu},
+    .max_id = 7u,
 };
 
 /* ========================= 掉线判据 ========================= */
 
 #define DJI_MOTOR_TIMEOUT_MS   50u
-#define DJI_TIMEOUT_TICKS      ((uint32_t)DJI_MOTOR_TIMEOUT_MS * (uint32_t)configTICK_RATE_HZ / 1000u)
 
 /* ========================= ① 注册表 =========================
  * 定长数组，不是链表 —— 查找有上界，缓存友好。
- * 按 (总线, id) 匹配：同一路 CAN 上 id 唯一，但不同总线可以有同 id 的电机，
- * 所以总线也要一起比。8 项线性扫描，在中断里也就是几十纳秒。 */
+ * 按 (总线, 反馈 ID) 匹配；不同型号的电调 id 相同不一定冲突，
+ * 但同一路 CAN 的实际反馈 ID 必须唯一。所有总线合计容纳 13 台。 */
 
 static DjiMotor_t *s_table[DJI_MOTOR_MAX];
 
 /* 注册失败次数。上电后在 Keil 的 Watch 里看一眼就行：
- *   0   = 五台全部注册成功
- *   非 0 = 有电机没注册上（id 越界 / (总线,id) 撞车 / 表满），
+ *   0   = 已启用的注册调用全部成功
+ *   非 0 = 有电机没注册上（id 越界 / 反馈 ID 冲突 / 实例重复 / 表满），
  *          那台轴会永远收不到反馈 —— 现象是 MoveTurns 一直返回
  *          MOTORAPP_ERR_NOFB，但 CAN 上看着一切正常，很难查。
  * 最常见的起因：两台电调的 id 被设成了同一个（硬件那边的事），
  * 或者固件这边 DjiMotor_Init 里的号和 main.c 的滤波器对不上。 */
 uint32_t g_djimotor_reg_fail;
 
-static DjiMotor_t *dji_find(FDCAN_HandleTypeDef *hfdcan, uint8_t id)
+static DjiMotor_t *dji_find(FDCAN_HandleTypeDef *hfdcan, uint16_t can_id)
 {
     uint8_t i;
 
     for (i = 0u; i < DJI_MOTOR_MAX; i++) {
         DjiMotor_t *m = s_table[i];
-        if ((m != NULL) && (m->hfdcan == hfdcan) && (m->id == id)) {
+        if ((m != NULL) && (m->hfdcan == hfdcan) &&
+            ((uint16_t)(m->model->feedback_base + m->id) == can_id)) {
             return m;
         }
     }
@@ -78,54 +92,60 @@ DjiMotor_t *DjiMotor_Register(DjiMotor_t *motor,
                               const DjiMotor_Model_t *model)
 {
     uint8_t i;
+    uint8_t slot = DJI_MOTOR_MAX;
 
     if ((motor == NULL) || (hfdcan == NULL) || (model == NULL)) {
         g_djimotor_reg_fail++;
         return NULL;
     }
-    if ((id < 1u) || (id > DJI_MOTOR_MAX)) {
+    if ((id < 1u) || (id > model->max_id)) {
         g_djimotor_reg_fail++;
         return NULL;
     }
-    if (dji_find(hfdcan, id) != NULL) {
-        g_djimotor_reg_fail++;
-        return NULL;                    /* (总线, id) 撞车 */
-    }
-
     for (i = 0u; i < DJI_MOTOR_MAX; i++) {
-        if (s_table[i] == NULL) {
-            s_table[i] = motor;
-
-            motor->hfdcan          = hfdcan;
-            motor->id              = id;
-            motor->model           = model;
-            motor->raw_angle       = 0u;
-            motor->raw_speed       = 0;
-            motor->raw_current     = 0;
-            motor->raw_temp        = 0u;
-            motor->rx_tick         = 0u;
-            motor->rx_count        = 0u;
-            motor->total_counts    = 0;
-            motor->prev_raw_angle  = 0;
-            motor->angle_seeded    = 0u;
-            motor->angle_rad       = 0.0f;
-            motor->speed_rad_s     = 0.0f;
-            motor->torque_nm       = 0.0f;
-            motor->cmd             = 0;
-
-            return motor;
+        DjiMotor_t *m = s_table[i];
+        if (m == NULL) {
+            if (slot == DJI_MOTOR_MAX) { slot = i; }
+            continue;
+        }
+        if ((m == motor) || ((m->hfdcan == hfdcan) &&
+            (m->model->feedback_base + m->id == model->feedback_base + id))) {
+            g_djimotor_reg_fail++;
+            return NULL;                /* 实例重复或实际反馈 ID 冲突 */
         }
     }
-    g_djimotor_reg_fail++;
-    return NULL;                        /* 表满 */
+    if (slot == DJI_MOTOR_MAX) {
+        g_djimotor_reg_fail++;
+        return NULL;
+    }
+
+    motor->hfdcan          = hfdcan;
+    motor->id              = id;
+    motor->model           = model;
+    motor->raw_angle       = 0u;
+    motor->raw_speed       = 0;
+    motor->raw_current     = 0;
+    motor->raw_temp        = 0u;
+    motor->rx_tick         = 0u;
+    motor->rx_count        = 0u;
+    motor->total_counts    = 0;
+    motor->prev_raw_angle  = 0;
+    motor->angle_seeded    = 0u;
+    motor->angle_rad       = 0.0f;
+    motor->speed_rad_s     = 0.0f;
+    motor->torque_nm       = 0.0f;
+    motor->cmd             = 0;
+
+    /* 初始化完成后加入注册表。 */
+    s_table[slot] = motor;
+    return motor;
 }
 
 /* ========================= ② 中断：存 raw =========================
  * 只做四件事：拷 4 个原始值、记时间戳、计数。
  * 浮点换算、角度回绕全留给任务 —— 中断里那些都是白烧时间。
  *
- * 注意是【大端】：高字节在前。DJI 这套帧和一般 CAN 报文的习惯相反，
- * 抄别的库时最容易在这里翻车。 */
+ * 注意各字段都是高字节在前。 */
 
 void DjiMotor_OnCanFrame(FDCAN_HandleTypeDef *hfdcan,
                          uint16_t can_id,
@@ -133,17 +153,11 @@ void DjiMotor_OnCanFrame(FDCAN_HandleTypeDef *hfdcan,
                          uint8_t len)
 {
     DjiMotor_t *m;
-    uint8_t id;
 
     if ((data == NULL) || (len < 7u)) {
         return;                         /* 反馈帧有效长度是 7 */
     }
-    if ((can_id < 0x201u) || (can_id > 0x208u)) {
-        return;                         /* 不是电机反馈 */
-    }
-
-    id = (uint8_t)(can_id - 0x200u);
-    m  = dji_find(hfdcan, id);
+    m = dji_find(hfdcan, can_id);
     if (m == NULL) {
         return;                         /* 这台没注册，静默丢 */
     }
@@ -153,7 +167,8 @@ void DjiMotor_OnCanFrame(FDCAN_HandleTypeDef *hfdcan,
     m->raw_current = (int16_t)(((int16_t)data[4] << 8) | (int16_t)data[5]);
     m->raw_temp    = data[6];
 
-    m->rx_tick  = osKernelGetTickCount();
+    /* CAN can receive before the RTOS starts; HAL time is already available. */
+    m->rx_tick  = HAL_GetTick();
     m->rx_count++;
 }
 
@@ -161,10 +176,14 @@ void DjiMotor_OnCanFrame(FDCAN_HandleTypeDef *hfdcan,
 
 int DjiMotor_IsOnline(const DjiMotor_t *motor)
 {
+    uint32_t last_rx_tick;
     if ((motor == NULL) || (motor->rx_count == 0u)) {
         return 0;                       /* 一帧都没收到过 */
     }
-    return ((osKernelGetTickCount() - motor->rx_tick) <= DJI_TIMEOUT_TICKS) ? 1 : 0;
+    /* 先取反馈时间，再取当前时间。CAN中断可能在两次读取间更新rx_tick；
+     * 若先读now再读新的rx_tick，后者可能晚1ms， unsigned减法会下溢误判掉线。 */
+    last_rx_tick = motor->rx_tick;
+    return ((uint32_t)(HAL_GetTick() - last_rx_tick) <= DJI_MOTOR_TIMEOUT_MS) ? 1 : 0;
 }
 
 void DjiMotor_Update(DjiMotor_t *motor)
@@ -215,23 +234,16 @@ void DjiMotor_Update(DjiMotor_t *motor)
 
 HAL_StatusTypeDef DjiMotor_SendGroup(FDCAN_HandleTypeDef *hfdcan, uint8_t group)
 {
+    static const uint16_t frame_ids[3] = {0x200u, 0x1FFu, 0x2FFu};
     uint8_t  data[8];
-    uint8_t  base, i;
+    uint8_t  i;
     uint16_t can_id;
     int      any = 0;
 
-    if (hfdcan == NULL) {
+    if ((hfdcan == NULL) || (group > 2u)) {
         return HAL_ERROR;
     }
-    if (group == 0u) {
-        can_id = 0x200u;
-        base   = 1u;                    /* 装 id 1~4 */
-    } else if (group == 1u) {
-        can_id = 0x1FFu;
-        base   = 5u;                    /* 装 id 5~8 */
-    } else {
-        return HAL_ERROR;
-    }
+    can_id = frame_ids[group];
 
     for (i = 0u; i < 8u; i++) {
         data[i] = 0u;                   /* 空槽位补 0，电机收到 0 = 不出力 */
@@ -240,12 +252,13 @@ HAL_StatusTypeDef DjiMotor_SendGroup(FDCAN_HandleTypeDef *hfdcan, uint8_t group)
     for (i = 0u; i < DJI_MOTOR_MAX; i++) {
         DjiMotor_t *m = s_table[i];
         int32_t     v;
+        uint16_t    raw;
         uint8_t     slot;
 
         if ((m == NULL) || (m->hfdcan != hfdcan)) {
             continue;
         }
-        if ((m->id < base) || (m->id >= (uint8_t)(base + 4u))) {
+        if (m->model->command_id[(m->id - 1u) / 4u] != can_id) {
             continue;
         }
 
@@ -260,9 +273,10 @@ HAL_StatusTypeDef DjiMotor_SendGroup(FDCAN_HandleTypeDef *hfdcan, uint8_t group)
             v = -(int32_t)m->model->cmd_max;
         }
 
-        slot = (uint8_t)(m->id - base);         /* 0..3 → 帧内第几个 */
-        data[slot * 2u]      = (uint8_t)((v >> 8) & 0xFF);      /* 高字节在前 */
-        data[slot * 2u + 1u] = (uint8_t)(v & 0xFF);
+        slot = (uint8_t)((m->id - 1u) % 4u);
+        raw = (uint16_t)v;
+        data[slot * 2u]      = (uint8_t)(raw >> 8u);
+        data[slot * 2u + 1u] = (uint8_t)(raw & 0xFFu);
 
         any = 1;
     }
@@ -275,30 +289,60 @@ HAL_StatusTypeDef DjiMotor_SendGroup(FDCAN_HandleTypeDef *hfdcan, uint8_t group)
 }
 
 /* ========================= 本机电机清单 =========================
- * 现在的配置：CAN1 上 3 台 M3508（id 1~3）+ 2 台 M2006（id 4~5）。
+ * 共 7 台 M3508 + 2 台 M2006 + 4 台 GM6020 的实例。
+ * 已启用底盘 8 台，按左前、右前、左后、右后注册。
+ * 上层 5 台均在 CAN3：3508_1/2/3 的 ID 为 5/2/1，2006_1/2 为 4/3。
  *
  * id 是【电调自己的设置】（C620/C610 在上位机软件里配），固件这边的号
  * 只是跟着填，不是我们定的。两边必须一致：不一致时反馈会解到别人身上
  * （两台对调），或者那台一点反馈都收不到（被 main.c 的滤波器挡掉）。
  *
- * 改 id 只动两处：这里的 DjiMotor_Register 参数，和 main.c 的 can1_filter。
+ * 改 CAN / id 时同步修改注册参数和 main.c 对应总线的滤波器及启动配置。
  * 驱动、轴表、算法都不用动 —— Register/SendGroup 都是把 id 当参数收的。
  *
  * 非 static：Keil 的 Watch 窗口里能直接看每台的状态，调车时方便。 */
 
-DjiMotor_t g_motor_3508_1;      /* 0x201 */
-DjiMotor_t g_motor_3508_2;      /* 0x202 */
-DjiMotor_t g_motor_3508_3;      /* 0x203 */
-DjiMotor_t g_motor_2006_1;      /* 0x204 */
-DjiMotor_t g_motor_2006_2;      /* 0x205 */
+DjiMotor_t g_motor_3508_1;      /* 上层：CAN3 ID5 */
+DjiMotor_t g_motor_3508_2;      /* 上层：CAN3 ID2 */
+DjiMotor_t g_motor_3508_3;      /* 上层：CAN3 ID1 */
+
+DjiMotor_t g_motor_3508_4;      /* 左前行走：CAN1 ID1 */
+DjiMotor_t g_motor_3508_5;      /* 右前行走：CAN2 ID4 */
+DjiMotor_t g_motor_3508_6;      /* 左后行走：CAN1 ID2 */
+DjiMotor_t g_motor_3508_7;      /* 右后行走：CAN2 ID3 */
+
+DjiMotor_t g_motor_2006_1;      /* 上层：CAN3 ID4 */
+DjiMotor_t g_motor_2006_2;      /* 上层：CAN3 ID3 */
+
+DjiMotor_t g_motor_6020_1;      /* 左前转向：CAN1 ID1 */
+DjiMotor_t g_motor_6020_2;      /* 左后转向：CAN1 ID2 */
+DjiMotor_t g_motor_6020_3;      /* 右后转向：CAN2 ID3 */
+DjiMotor_t g_motor_6020_4;      /* 右前转向：CAN2 ID4 */
 
 void DjiMotor_Init(void)
 {
-    (void)DjiMotor_Register(&g_motor_3508_1, &hfdcan1, 1u, &DJI_MODEL_3508);
-    (void)DjiMotor_Register(&g_motor_3508_2, &hfdcan1, 2u, &DJI_MODEL_3508);
-    (void)DjiMotor_Register(&g_motor_3508_3, &hfdcan1, 3u, &DJI_MODEL_3508);
-    (void)DjiMotor_Register(&g_motor_2006_1, &hfdcan1, 4u, &DJI_MODEL_2006);
-    (void)DjiMotor_Register(&g_motor_2006_2, &hfdcan1, 5u, &DJI_MODEL_2006);
+    /* 左前 */
+    (void)DjiMotor_Register(&g_motor_3508_4, &hfdcan1, 1u, &DJI_MODEL_3508);
+    (void)DjiMotor_Register(&g_motor_6020_1, &hfdcan1, 1u, &DJI_MODEL_6020);
+
+    /* 右前 */
+    (void)DjiMotor_Register(&g_motor_3508_5, &hfdcan2, 4u, &DJI_MODEL_3508);
+    (void)DjiMotor_Register(&g_motor_6020_4, &hfdcan2, 4u, &DJI_MODEL_6020);
+
+    /* 左后 */
+    (void)DjiMotor_Register(&g_motor_3508_6, &hfdcan1, 2u, &DJI_MODEL_3508);
+    (void)DjiMotor_Register(&g_motor_6020_2, &hfdcan1, 2u, &DJI_MODEL_6020);
+
+    /* 右后 */
+    (void)DjiMotor_Register(&g_motor_3508_7, &hfdcan2, 3u, &DJI_MODEL_3508);
+    (void)DjiMotor_Register(&g_motor_6020_3, &hfdcan2, 3u, &DJI_MODEL_6020);
+
+    /* 上层机构，按实例编号对应用户给出的 ID 顺序。 */
+    (void)DjiMotor_Register(&g_motor_3508_1, &hfdcan3, 5u, &DJI_MODEL_3508);
+    (void)DjiMotor_Register(&g_motor_3508_2, &hfdcan3, 2u, &DJI_MODEL_3508);
+    (void)DjiMotor_Register(&g_motor_3508_3, &hfdcan3, 1u, &DJI_MODEL_3508);
+    (void)DjiMotor_Register(&g_motor_2006_1, &hfdcan3, 4u, &DJI_MODEL_2006);
+    (void)DjiMotor_Register(&g_motor_2006_2, &hfdcan3, 3u, &DJI_MODEL_2006);
 }
 
 /* ========================= 接管 CAN 接收 =========================
@@ -312,4 +356,5 @@ void BSP_CAN_OnReceive(FDCAN_HandleTypeDef *hfdcan,
                        uint8_t len)
 {
     DjiMotor_OnCanFrame(hfdcan, can_id, data, len);
+    Test_EncoderOnCanFrame(hfdcan, can_id, data, len);
 }

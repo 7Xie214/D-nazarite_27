@@ -4,6 +4,31 @@
 
 /* CubeMX 生成的 fdcan.h 里已经 extern 声明了 hfdcan1/2/3，这里不用重复声明 */
 
+volatile BSP_CAN_Diagnostics_t g_can_diagnostics[3];
+
+static volatile BSP_CAN_Diagnostics_t *can_record_error(FDCAN_HandleTypeDef *hfdcan,
+                                                       uint32_t psr)
+{
+    uint32_t index = (hfdcan->Instance == FDCAN1) ? 0u :
+                     ((hfdcan->Instance == FDCAN2) ? 1u : 2u);
+    volatile BSP_CAN_Diagnostics_t *diag = &g_can_diagnostics[index];
+    uint32_t lec = psr & FDCAN_PSR_LEC;
+
+    if ((lec > 0u) && (lec < 7u)) {
+        if (diag->first_error_code == 0u) {
+            diag->first_error_code = lec;
+        }
+        diag->last_error_code = lec;
+    }
+    if (((lec > 0u) && (lec < 7u)) || ((psr & FDCAN_PSR_BO) != 0u)) {
+        diag->last_psr = psr;
+        diag->last_ecr = hfdcan->Instance->ECR;
+        diag->error_record_count++;
+        diag->last_error_tick_ms = HAL_GetTick();
+    }
+    return diag;
+}
+
 HAL_StatusTypeDef BSP_CAN_Init(FDCAN_HandleTypeDef *hfdcan,
                                const CAN_Filter_t *filters,
                                uint8_t count)
@@ -46,15 +71,38 @@ HAL_StatusTypeDef BSP_CAN_Init(FDCAN_HandleTypeDef *hfdcan,
         }
     }
 
-    /* 3) 打开 Rx FIFO0 新消息中断 */
+    /* 3) 接收与错误中断：错误码在第一次中断中保存，避免被轮询读成 7。 */
     if (HAL_FDCAN_ActivateNotification(hfdcan,
-                                       FDCAN_IT_RX_FIFO0_NEW_MESSAGE,
+                                       FDCAN_IT_RX_FIFO0_NEW_MESSAGE |
+                                       FDCAN_IT_BUS_OFF |
+                                       FDCAN_IT_ARB_PROTOCOL_ERROR |
+                                       FDCAN_IT_DATA_PROTOCOL_ERROR,
                                        0U) != HAL_OK) {
         return HAL_ERROR;
     }
 
     /* 4) 启动 */
     return HAL_FDCAN_Start(hfdcan);
+}
+
+void HAL_FDCAN_ErrorCallback(FDCAN_HandleTypeDef *hfdcan)
+{
+    (void)can_record_error(hfdcan, hfdcan->Instance->PSR);
+}
+
+void HAL_FDCAN_ErrorStatusCallback(FDCAN_HandleTypeDef *hfdcan, uint32_t ErrorStatusITs)
+{
+    if ((ErrorStatusITs & FDCAN_IT_BUS_OFF) != 0u) {
+        uint32_t psr = hfdcan->Instance->PSR;
+        if ((psr & FDCAN_PSR_BO) != 0u) {
+            volatile BSP_CAN_Diagnostics_t *diag = can_record_error(hfdcan, psr);
+            diag->bus_off_count++;
+            /* 丢弃旧控制帧，再释放 INIT，让硬件完成 Bus-Off 恢复序列。
+             * 此处不调用 HAL_FDCAN_Start：HAL 句柄仍处于 BUSY。 */
+            (void)HAL_FDCAN_AbortTxRequest(hfdcan, hfdcan->Instance->TXBRP);
+            CLEAR_BIT(hfdcan->Instance->CCCR, FDCAN_CCCR_INIT);
+        }
+    }
 }
 
 HAL_StatusTypeDef BSP_CAN_Send(FDCAN_HandleTypeDef *hfdcan,

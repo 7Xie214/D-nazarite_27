@@ -45,3 +45,4 @@ nazarite_27_upstairs\motorapp.o: ../algorithm/Inc/PID.h
 nazarite_27_upstairs\motorapp.o: ../algorithm/Inc/Traj.h
 nazarite_27_upstairs\motorapp.o: ../algorithm/Inc/PID_Config.h
 nazarite_27_upstairs\motorapp.o: ../Core/Inc/fdcan.h
+nazarite_27_upstairs\motorapp.o: D:\keil5\ARM\ARMCC\Bin\..\include\string.h

@@ -19,6 +19,7 @@
                 "STM32H723xx"
             ],
             "includePath": [
+                "${workspaceFolder}/Test/Inc",
                 "${workspaceFolder}/Chassis/Inc",
                 "${workspaceFolder}/Device/Inc",
                 "${workspaceFolder}/algorithm/Inc",
@@ -37,6 +38,8 @@
             ],
             "browse": {
                 "path": [
+                    "${workspaceFolder}/Test/Inc",
+                    "${workspaceFolder}/Test/Src",
                     "${workspaceFolder}/Chassis/Inc",
                     "${workspaceFolder}/Chassis/Src",
                     "${workspaceFolder}/Device/Inc",

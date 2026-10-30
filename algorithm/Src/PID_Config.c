@@ -1,7 +1,7 @@
 /**
- * 控制参数值。增益还全是 0，只有上台阶那两根轴的 traj_v_max / traj_a_max
- * 填了数（两轴按行程缩放，见下面那段）—— 结构先搭好，等整机通电、确定
- * 量纲之后再把增益填进去。
+ * 控制参数值。上层三台 3508 已填约 2s 同步运动的试跑参数，需按负载调参。
+ * 速度环使用减速后输出轴 rad/s；轨迹时间在 Task/Src/My_task.c 配置。
+ * 此处的试跑增益不代表已经完成实物标定。
  *
  * ---------------------------------------------------------------------------
  * 【每根轴一份】
@@ -15,8 +15,8 @@
  *   spd_out_max   电机的电流命令量程。3508/C620 是 16384，2006/C610 是
  *                 10000。填超了会把小电调顶爆 —— 改参数的时候别动它。
  *
- * 现在增益是 0，所以 PID 输出恒为 0 —— 上电跑会看到"轨迹按时序走完、
- * 状态机正常推进，但机构一动不动"。这不是坏的，是增益没填。
+ * 如果增益或位置环速度限幅为 0，可能不会输出驱动力。参考轨迹可以走，
+ * 但状态机还要等实际位置、速度稳定到位，因此不能靠规划结束推进步骤。
  * 反过来 traj_v_max = 0 时规划器不动，那种情况下轴永远到不了位。
  *
  * ---------------------------------------------------------------------------
@@ -51,117 +51,190 @@
 
 #include "PID_Config.h"
 
-/* ====================== 上台阶两轴的时间尺度 ======================
- *
- * 两根杆必须【同时到位】，但行程不同（轴1 走 22.92 圈、轴2 走 34.38 圈，
- * 差 1.5 倍）。这个靠调 PID 拉不齐 —— 环路只负责跟踪，什么时候到是由
- * 轨迹决定的。参数给成一样只会让两轴角速度一样，行程长的必然晚到。
- *
- * 做法：两轴共用同一组时间尺度，各自的 v_max / a_max 按【行程】缩放。
- *   速度、加速度都正比于 D  ⇒  两个剖面互为"时间缩放版"
- *
- *     v_max_i = R · D_i
- *     a_max_i = Q · D_i
- *
- * 于是两个跟行程无关的量被钉死了：
- *     全程时间 T = 1/R + R/Q
- *     加速时间   = R/Q          （= v_max/a_max，与 D 无关）
- * 行程差多少都不会跑偏，两轴严格同时到位。三角形剖面同理。
- *
- * 这三个宏只被本文件用，所以放在 .c 里、不进头文件 —— 放头文件会污染
- * 所有 include 它的人（MotorApp.c 里就有一份自己的 TWO_PI，会撞车）。
- *
- * ⚠️ 单位：pos_ref / vel_ref 都是【输出轴弧度】，所以 D 必须先把圈数乘
- *    2π。下面的 _TURNS 是圈数，乘完 2π 才是 D（弧度）。
- *
- * ⚠️ _TURNS 和 My_task.c 里 MoveTurns 传的是同一组值，现在有 4 处字面量。
- *    改行程时要 4 处一起改 —— 建议后面把它们提到头文件里共用一份。 */
+/* No assumed travel speed or tuned gains. C620 current range is fixed. */
+const Axis_Cfg_t CHASSIS_FRONT_MOVE_CFG[2] = {
+    { /* FL */
+        .cascade = {
+            .pos_kp = 0.0f, .pos_ki = 0.0f,
+            .pos_integral_max = 0.0f, .pos_speed_limit = 0.0f,
+            .spd_kp = 0.0f, .spd_ki = 0.0f, .spd_kd = 0.0f,
+            .spd_integral_max = 0.0f, .spd_out_max = 16384.0f,
+            .spd_d_alpha = 1.0f, .spd_anti_windup = PID_AW_COND,
+            .spd_integ_sep_thr = 0.0f
+        },
+        .traj_v_max = 0.0f, .traj_a_max = 0.0f
+    },
+    { /* FR */
+        .cascade = {
+            .pos_kp = 0.0f, .pos_ki = 0.0f,
+            .pos_integral_max = 0.0f, .pos_speed_limit = 0.0f,
+            .spd_kp = 0.0f, .spd_ki = 0.0f, .spd_kd = 0.0f,
+            .spd_integral_max = 0.0f, .spd_out_max = 16384.0f,
+            .spd_d_alpha = 1.0f, .spd_anti_windup = PID_AW_COND,
+            .spd_integ_sep_thr = 0.0f
+        },
+        .traj_v_max = 0.0f, .traj_a_max = 0.0f
+    }
+};
 
+/* Four chassis wheels: no tuned gains or assumed steering speed limit. */
+const Chassis_PID_Cfg_t CHASSIS_PID_CFG[4] = {
+    { /* FL: tune independently; steering position speed limit is rad/s. */
+        .steer = {
+            .pos_kp = 0.0f, .pos_ki = 0.0f,
+            .pos_integral_max = 0.0f, .pos_speed_limit = 0.0f,
+            .spd_kp = 0.0f, .spd_ki = 0.0f, .spd_kd = 0.0f,
+            .spd_integral_max = 0.0f, .spd_out_max = 30000.0f,
+            .spd_d_alpha = 1.0f, .spd_anti_windup = PID_AW_COND,
+            .spd_integ_sep_thr = 0.0f
+        },
+        .drive = {
+            .kp = 0.0f, .ki = 0.0f, .kd = 0.0f,
+            .integral_max = 0.0f, .out_max = 16384.0f,
+            .d_alpha = 1.0f, .anti_windup = PID_AW_COND,
+            .integ_sep_thr = 0.0f
+        }
+    },
+    { /* FR: tune independently; steering position speed limit is rad/s. */
+        .steer = {
+            .pos_kp = 0.0f, .pos_ki = 0.0f,
+            .pos_integral_max = 0.0f, .pos_speed_limit = 0.0f,
+            .spd_kp = 0.0f, .spd_ki = 0.0f, .spd_kd = 0.0f,
+            .spd_integral_max = 0.0f, .spd_out_max = 30000.0f,
+            .spd_d_alpha = 1.0f, .spd_anti_windup = PID_AW_COND,
+            .spd_integ_sep_thr = 0.0f
+        },
+        .drive = {
+            .kp = 0.0f, .ki = 0.0f, .kd = 0.0f,
+            .integral_max = 0.0f, .out_max = 16384.0f,
+            .d_alpha = 1.0f, .anti_windup = PID_AW_COND,
+            .integ_sep_thr = 0.0f
+        }
+    },
+    { /* RL: tune independently; steering position speed limit is rad/s. */
+        .steer = {
+            .pos_kp = 0.0f, .pos_ki = 0.0f,
+            .pos_integral_max = 0.0f, .pos_speed_limit = 0.0f,
+            .spd_kp = 0.0f, .spd_ki = 0.0f, .spd_kd = 0.0f,
+            .spd_integral_max = 0.0f, .spd_out_max = 30000.0f,
+            .spd_d_alpha = 1.0f, .spd_anti_windup = PID_AW_COND,
+            .spd_integ_sep_thr = 0.0f
+        },
+        .drive = {
+            .kp = 0.0f, .ki = 0.0f, .kd = 0.0f,
+            .integral_max = 0.0f, .out_max = 16384.0f,
+            .d_alpha = 1.0f, .anti_windup = PID_AW_COND,
+            .integ_sep_thr = 0.0f
+        }
+    },
+    { /* RR: tune independently; steering position speed limit is rad/s. */
+        .steer = {
+            .pos_kp = 0.0f, .pos_ki = 0.0f,
+            .pos_integral_max = 0.0f, .pos_speed_limit = 0.0f,
+            .spd_kp = 0.0f, .spd_ki = 0.0f, .spd_kd = 0.0f,
+            .spd_integral_max = 0.0f, .spd_out_max = 30000.0f,
+            .spd_d_alpha = 1.0f, .spd_anti_windup = PID_AW_COND,
+            .spd_integ_sep_thr = 0.0f
+        },
+        .drive = {
+            .kp = 0.0f, .ki = 0.0f, .kd = 0.0f,
+            .integral_max = 0.0f, .out_max = 16384.0f,
+            .d_alpha = 1.0f, .anti_windup = PID_AW_COND,
+            .integ_sep_thr = 0.0f
+        }
+    }
+};
+
+/* 上层单轴 MoveTurns 的默认规划限幅，统一使用输出轴 rad / rad/s。
+ * MoveTurns 的输入现在是转子圈数，所以默认行程换算也除一次减速比。
+ * 三台 3508 同步运动另用一个 0~1 进度规划器，行程和时间尺度在
+ * Task/Src/My_task.c 填写，不依赖这里两份旧行程字面量保持同步。 */
 #define TWO_PI          6.28318530718f
-
-#define STAIR_R         0.12f   /* 1/s  ；全程 ≈ 1/R + R/Q 秒 */
-#define STAIR_Q         0.12f   /* 1/s² ；R/Q = 加速段时间 */
-
-/* 行程（【输出轴】圈数）。
- * ⚠️ 现在这两个数还是【没除减速比】的旧值（My_task.c 里留了标记），
- *    更正时连同 My_task.c 那两处一起改。 */
-#define STAIR_TURNS_1   22.9218927f
-#define STAIR_TURNS_2   34.382839f
-
-/* 行程（弧度）= 圈数 × 2π。
- * v_max 和 a_max 都从这一个数推 —— 不可能只给一个乘 2π、另一个忘了。 */
-#define STAIR_D1        (STAIR_TURNS_1 * TWO_PI)    /*  144.02 rad */
-#define STAIR_D2        (STAIR_TURNS_2 * TWO_PI)    /*  216.03 rad */
-
-/* ====================== 3508 · 轴 1（反馈 ID 0x201） ======================
+#define STAIR_R         0.12f
+#define STAIR_Q         0.12f
+#define STAIR_TURNS_1   22.9218927f   /* 转子圈数 */
+#define STAIR_TURNS_2   34.382839f    /* 转子圈数 */
+#define STAIR_D1        (STAIR_TURNS_1 * TWO_PI / (3591.0f / 187.0f))
+#define STAIR_D2        (STAIR_TURNS_2 * TWO_PI / (3591.0f / 187.0f))
+/* ====================== 3508 · 轴 1（CAN3 反馈 ID 0x205） ======================
  *
  * 下面每根轴的块结构完全一样。把 _1/_2/_3 改成机构上的位置名（升降、
  * 大臂、小臂之类）更好认 —— 名字只在这三个文件和 MotorApp.c 里出现。 */
 
+/* 上层 3508 试跑 PI：
+ * 速度单位换算 k = (3591/187)*60/(2*pi) = 183.3771。
+ * 原转子 rpm 的 Kp=8 -> 当前输出 rad/s 的 Kp=1467.0171。
+ * Ki=2200.5256 是当前连续式 PI 的新试跑初值（积分时间约 0.667s），
+ * 不是对未知旧控制周期的离散 Ki=12 做等价移植。
+ * spd_integral_max 限制积分累积量，积分指令上限=Ki*spd_integral_max，
+ * 以各轴当前配置为准。位置环 P 按 CAN3 ID5/ID2/ID1 为24/24/18 (1/s)。
+ * pos_integral_max 为 0 时，位置积分不生效，即使 pos_ki 非零。
+ * 这些是带载试调值；实际到位时间和末端稳定性仍需实机确认。
+ */
 const Axis_Cfg_t AXIS_CFG_3508_1 = {
     .cascade = {
         /* ---- 位置环（PI，Kd 固定为 0，见 PositionLoop.h） ---- */
-        .pos_kp             = 0.0f,
-        .pos_ki             = 0.0f,
-        .pos_integral_max   = 0.0f,     /* 位置单位 · 秒 = rad·s */
-        .pos_speed_limit    = 0.0f,     /* rad/s，这个关节的速度上限 */
+        .pos_kp             = 24.0f,
+        .pos_ki             = 4.5f,
+        .pos_integral_max   = 15.0f,     /* 位置单位 · 秒 = rad·s */
+        .pos_speed_limit    = 30.0f,     /* 输出轴rad/s；快轨迹峰值约20，留余量纠偏 */
 
         /* ---- 速度环 ---- */
-        .spd_kp             = 0.0f,
-        .spd_ki             = 0.0f,
+        .spd_kp             = 2467.0171f,
+        .spd_ki             = 4200.5256f,
         .spd_kd             = 0.0f,
-        .spd_integral_max   = 0.0f,
+        .spd_integral_max   = (8000.0f / 2200.5256f),
         .spd_out_max        = 16384.0f, /* C620 量程 —— 跟型号走，别按轴改 */
         .spd_d_alpha        = 1.0f,     /* 1 = 不滤波；建议 0.1~0.5 */
         .spd_anti_windup    = PID_AW_COND,
         .spd_integ_sep_thr  = 0.0f,     /* <= 0 表示不启用积分分离 */
     },
-    .traj_v_max = STAIR_R * STAIR_D1,   /* ≈ 17.28 rad/s  —— 全程 9.33s */
-    .traj_a_max = STAIR_Q * STAIR_D1,   /* ≈ 17.28 rad/s² —— 加速 1.00s */
+    .traj_v_max = 20.0f,                /* ID5独立触发：输出轴rad/s；20转子圈理论0.527s */
+    .traj_a_max = 100.0f,               /* 输出轴rad/s²；35转子圈理论0.773s */
 };
 
 /* ====================== 3508 · 轴 2（反馈 ID 0x202） ====================== */
 
 const Axis_Cfg_t AXIS_CFG_3508_2 = {
     .cascade = {
-        .pos_kp             = 0.0f,
-        .pos_ki             = 0.0f,
-        .pos_integral_max   = 0.0f,
-        .pos_speed_limit    = 0.0f,
+        .pos_kp             = 24.0f,    /* CAN3 ID2：增强末端位置纠偏 */
+        .pos_ki             = 4.5f,
+        .pos_integral_max   = 15.0f,
+        .pos_speed_limit    = 30.0f,     /* 输出轴rad/s，快轨迹及位置纠偏共用上限 */
 
-        .spd_kp             = 0.0f,
-        .spd_ki             = 0.0f,
+        .spd_kp             = 1467.0171f,
+        .spd_ki             = 2200.5256f,
         .spd_kd             = 0.0f,
-        .spd_integral_max   = 0.0f,
+        .spd_integral_max   = (8000.0f / 2200.5256f), /* ID2 带载到位试调 */
         .spd_out_max        = 16384.0f, /* C620 量程 —— 跟型号走，别按轴改 */
-        .spd_d_alpha        = 1.0f,
+        .spd_d_alpha        = 0.5f,
         .spd_anti_windup    = PID_AW_COND,
         .spd_integ_sep_thr  = 0.0f,
     },
-    .traj_v_max = STAIR_R * STAIR_D2,   /* ≈ 25.92 rad/s  —— 和轴1 同时到位 */
-    .traj_a_max = STAIR_Q * STAIR_D2,   /* ≈ 25.92 rad/s² —— 加速 1.00s */
+    .traj_v_max = 30.0f,   /* 单轴MoveTurns：输出轴rad/s */
+    .traj_a_max = 30.0f,   /* 输出轴rad/s² */
 };
 
-/* ====================== 3508 · 轴 3（反馈 ID 0x203） ====================== */
+/* ====================== 3508 · 轴 3（CAN3 反馈 ID 0x201） ====================== */
 
 const Axis_Cfg_t AXIS_CFG_3508_3 = {
     .cascade = {
-        .pos_kp             = 0.0f,
-        .pos_ki             = 0.0f,
-        .pos_integral_max   = 0.0f,
-        .pos_speed_limit    = 0.0f,
+        .pos_kp             = 24.0f,
+        .pos_ki             = 4.5f,
+        .pos_integral_max   = 15.0f,
+        .pos_speed_limit    = 30.0f,     /* 输出轴rad/s；当前快轨迹峰值约19.1 */
 
-        .spd_kp             = 0.0f,
-        .spd_ki             = 0.0f,
+        .spd_kp             = 1467.0171f,
+        .spd_ki             = 2200.5256f,
         .spd_kd             = 0.0f,
-        .spd_integral_max   = 0.0f,
+        .spd_integral_max   = (8000.0f / 2200.5256f),
         .spd_out_max        = 16384.0f, /* C620 量程 —— 跟型号走，别按轴改 */
         .spd_d_alpha        = 1.0f,
         .spd_anti_windup    = PID_AW_COND,
         .spd_integ_sep_thr  = 0.0f,
     },
-    .traj_v_max = 0.0f,
-    .traj_a_max = 0.0f,
+    .traj_v_max = 30.0f,   /* 单轴MoveTurns：输出轴rad/s */
+    .traj_a_max = 30.0f,
 };
 
 /* ====================== 2006 · 轴 4（反馈 ID 0x204） ======================
@@ -169,46 +242,60 @@ const Axis_Cfg_t AXIS_CFG_3508_3 = {
  * 注意 spd_out_max 是 10000 而不是 16384 —— C610 的量程比 C620 小。
  * 填成 16384 也能编过、也能动，但电调会长期被顶在量程边界上。 */
 
+/* 两份 AXIS_CFG 的串级PID用于双轮组；traj_v/a仅用于单轴MoveTurns。
+ * 第三步的公共轨迹速度、加速度在下面 MOTORPAIR_CFG_2006 中修改。
+ * 2006带载起步约需1000原始电流指令：速度PI先试300/150，单位为
+ * 输出轴rad/s；积分贡献限于±3000。这是新试调值，需实机确认响应。 */
 const Axis_Cfg_t AXIS_CFG_2006_1 = {
     .cascade = {
-        .pos_kp             = 0.0f,
+        .pos_kp             = 18.0f,
         .pos_ki             = 0.0f,
         .pos_integral_max   = 0.0f,
-        .pos_speed_limit    = 0.0f,
+        .pos_speed_limit    = 50.0f,    /* 输出轴 rad/s */
 
-        .spd_kp             = 0.0f,
-        .spd_ki             = 0.0f,
+        .spd_kp             = 300.0f,
+        .spd_ki             = 150.0f,
         .spd_kd             = 0.0f,
-        .spd_integral_max   = 0.0f,
+        .spd_integral_max   = (3000.0f / 150.0f), /* 积分累积量上限，I项±3000 */
         .spd_out_max        = 10000.0f, /* C610 量程，比 C620 小 —— 别按轴改 */
         .spd_d_alpha        = 1.0f,
         .spd_anti_windup    = PID_AW_COND,
         .spd_integ_sep_thr  = 0.0f,
     },
-    .traj_v_max = 0.0f,
-    .traj_a_max = 0.0f,
+    .traj_v_max = 15.0f,                /* 输出轴 rad/s */
+    .traj_a_max = 15.0f,                /* 输出轴 rad/s² */
 };
 
-/* ====================== 2006 · 轴 5（反馈 ID 0x205） ====================== */
+/* ====================== 2006 · 轴 5（CAN3 反馈 ID 0x203） ====================== */
 
 const Axis_Cfg_t AXIS_CFG_2006_2 = {
     .cascade = {
-        .pos_kp             = 0.0f,
+         .pos_kp             = 18.0f,
         .pos_ki             = 0.0f,
         .pos_integral_max   = 0.0f,
-        .pos_speed_limit    = 0.0f,
+        .pos_speed_limit    = 50.0f,    /* 输出轴 rad/s */
 
-        .spd_kp             = 0.0f,
-        .spd_ki             = 0.0f,
+        .spd_kp             = 300.0f,
+        .spd_ki             = 150.0f,
         .spd_kd             = 0.0f,
-        .spd_integral_max   = 0.0f,
+        .spd_integral_max   = (3000.0f / 150.0f), /* 积分累积量上限，I项±3000 */
         .spd_out_max        = 10000.0f, /* C610 量程，比 C620 小 —— 别按轴改 */
         .spd_d_alpha        = 1.0f,
         .spd_anti_windup    = PID_AW_COND,
         .spd_integ_sep_thr  = 0.0f,
     },
-    .traj_v_max = 0.0f,
-    .traj_a_max = 0.0f,
+    .traj_v_max = 15.0f,                /* 输出轴 rad/s */
+    .traj_a_max = 15.0f,                /* 输出轴 rad/s² */
+};
+
+/* 双2006直行组初测值：位置/同步误差按转子圈；速度/加速度按输出轴。
+ * 轮径和传动比假定相同。增益尚需带载标定；不再配置跟随减速/超时阈值。 */
+const MotorPair_Cfg_t MOTORPAIR_CFG_2006 = {
+    .traj_v_max = 30.0f,
+    .traj_a_max = 30.0f,
+    .sync_kp = 2.0f,
+    .sync_speed_max = 1.0f,
+    .command_a_max = 60.0f,
 };
 
 /* ============================== 应用 ============================== */

@@ -27,6 +27,13 @@ typedef enum {
     SWERVE_ERR_PARAM = -1
 } Swerve_Status_t;
 
+/* 舵角范围使用已校准的机械坐标系，枚举零值默认限制为 [-90, 90] 度。 */
+typedef enum {
+    SWERVE_ANGLE_MINUS_90_TO_90 = 0,
+    SWERVE_ANGLE_0_TO_180 = 1,
+    SWERVE_ANGLE_CONTINUOUS = 2
+} Swerve_AngleRange_t;
+
 /* 舵向配置。仅保存，解算中不应用这些硬件方向系数。 */
 typedef struct {
     uint16_t zero_offset;       /* 编码器零偏计数，由应用层解释其分辨率 */
@@ -48,11 +55,12 @@ typedef struct {
     float V_x;                  /* 本次底盘指令，m/s；成功解算后更新 */
     float V_y;                  /* 本次底盘指令，m/s；成功解算后更新 */
     float W_z;                  /* 本次底盘指令，rad/s；成功解算后更新 */
-    float target_angle_rad;     /* 连续目标舵角，rad；零速时保留上次值 */
+    float target_angle_rad;     /* 目标机械舵角，rad；零速时保留上次值 */
     float target_speed_mps;     /* 有正负号的轮缘线速度，m/s */
     float half_wheel_base;      /* 到中心的纵向距离绝对值，m（半轴距） */
     float half_track_width;     /* 到中心的横向距离绝对值，m（半轮距） */
-    float actual_angle_rad;     /* 已校准的实际机械舵角，rad，可跨圈累计 */
+    float actual_angle_rad;     /* 已校准的实际机械舵角，rad；连续模式可跨圈 */
+    Swerve_AngleRange_t angle_range; /* 每个轮组各自选择机械转向范围 */
 } Swerve_Module_t;
 
 /**
@@ -61,13 +69,20 @@ typedef struct {
  * 首次使用时调用方需把 target_angle_rad 设为希望静止保持的舵角。
  *
  * max_wheel_speed_mps 必须为正数；超限时对四轮速度等比例缩放。
- * 假定舵向机构可连续旋转：选择距实际舵角不超过 90 度的等效目标，必要时
- * 反转轮速。目标角不会强制归一化到 [-pi, pi)，以便位置环直接计算误差。
+ * 有限范围模式：目标限制在 [-pi/2, pi/2] 或 [0, pi] 的闭区间，选择距实际
+ * 舵角最近的合法等效朝向，必要时反转轮速。精确等距时优先正轮速表示。
+ * 生成的候选角距端点 <= 4*FLT_EPSILON rad 时对齐端点，消除浮点舍入误差。
+ * 机械限位优先，合法转向行程可能超过 90 度，不会跨过机械端点取捷径。
+ * 此时 actual_angle_rad 和上次 target_angle_rad 都必须在选定闭区间内；
+ * 不会自动对反馈归一化或钳位。
+ * 连续模式：选择距实际舵角不超过 90 度的等效目标，必要时反转轮速。
+ * 连续模式目标角不会强制归一化，以便位置环直接计算跨圈误差。
  * 轮速幅值 <= SWERVE_SPEED_EPS_MPS 时停驱动、保留上次目标舵角。
  *
- * 空指针、非四轮、非有限数值、负几何尺寸或计算溢出返回 SWERVE_ERR_PARAM，
+ * 空指针、非四轮、非有限数值、负几何尺寸、非法范围枚举、范围外实际/保持
+ * 舵角或计算溢出返回 SWERVE_ERR_PARAM，
  * 且不改变任何轮组字段。成功返回 SWERVE_OK。
- * 本函数不限制转向加速度，不处理舵向机械限位，不发送电流指令。
+ * 本函数不限制转向加速度、不处理限位开关、不发送电流指令。
  */
 Swerve_Status_t Swerve_Calculate(Swerve_Module_t *modules,
                                  size_t module_count,

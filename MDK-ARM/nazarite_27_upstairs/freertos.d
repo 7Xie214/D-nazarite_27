@@ -50,3 +50,9 @@ nazarite_27_upstairs\freertos.o: ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_h
 nazarite_27_upstairs\freertos.o: ../Drivers/CMSIS/RTOS2/Include/cmsis_os2.h
 nazarite_27_upstairs\freertos.o: ../APP/Inc/Communicate.h
 nazarite_27_upstairs\freertos.o: ../Task/Inc/My_task.h
+nazarite_27_upstairs\freertos.o: ../APP/Inc/MotorApp.h
+nazarite_27_upstairs\freertos.o: ../Device/Inc/DjiMotor.h
+nazarite_27_upstairs\freertos.o: ../algorithm/Inc/PositionLoop.h
+nazarite_27_upstairs\freertos.o: ../algorithm/Inc/PID.h
+nazarite_27_upstairs\freertos.o: ../algorithm/Inc/Traj.h
+nazarite_27_upstairs\freertos.o: ../Task/Inc/ChassisTask.h

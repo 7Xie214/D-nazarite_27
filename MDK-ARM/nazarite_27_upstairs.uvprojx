@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_PWR_LDO_SUPPLY,USE_HAL_DRIVER,STM32H723xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;../Middlewares/Third_Party/FreeRTOS/Source/include;../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2;../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F;../Drivers/CMSIS/RTOS2/Include;../Drivers/CMSIS/Device/ST/STM32H7xx/Include;../Drivers/CMSIS/Include;../BSP/Inc;../APP/Inc;../Task/Inc;../algorithm/Inc;../Device/Inc;../Chassis/Inc</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;../Middlewares/Third_Party/FreeRTOS/Source/include;../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2;../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F;../Drivers/CMSIS/RTOS2/Include;../Drivers/CMSIS/Device/ST/STM32H7xx/Include;../Drivers/CMSIS/Include;../BSP/Inc;../APP/Inc;../Task/Inc;../algorithm/Inc;../Device/Inc;../Chassis/Inc;../Test/Inc</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -454,6 +454,16 @@
               <FileType>1</FileType>
               <FilePath>../APP/Src/MotorApp.c</FilePath>
             </File>
+            <File>
+              <FileName>ChassisApp.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../APP/Src/ChassisApp.c</FilePath>
+            </File>
+            <File>
+              <FileName>ChassisApp.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../APP/Inc/ChassisApp.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -478,6 +488,16 @@
               <FileName>My_task.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Task/Src/My_task.c</FilePath>
+            </File>
+            <File>
+              <FileName>ChassisTask.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Task/Src/ChassisTask.c</FilePath>
+            </File>
+            <File>
+              <FileName>ChassisTask.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../Task/Inc/ChassisTask.h</FilePath>
             </File>
           </Files>
         </Group>
@@ -517,8 +537,48 @@
           </Files>
         </Group>
         <Group>
+          <GroupName>Application/User/Test</GroupName>
+          <Files>
+            <File>
+              <FileName>Encoder_Test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Test/Src/Encoder_Test.c</FilePath>
+            </File>
+            <File>
+              <FileName>Encoder_Test.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../Test/Inc/Encoder_Test.h</FilePath>
+            </File>
+            <File>
+              <FileName>Motor_Test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Test/Src/Motor_Test.c</FilePath>
+            </File>
+            <File>
+              <FileName>Motor_Test.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../Test/Inc/Motor_Test.h</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
           <GroupName>Application/User/Chassis</GroupName>
           <Files>
+            <File>
+              <FileName>Chassis.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Chassis/Src/Chassis.c</FilePath>
+            </File>
+            <File>
+              <FileName>Chassis.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../Chassis/Inc/Chassis.h</FilePath>
+            </File>
+            <File>
+              <FileName>Chassis_Conf.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../Chassis/Inc/Chassis_Conf.h</FilePath>
+            </File>
             <File>
               <FileName>Mecanum.c</FileName>
               <FileType>1</FileType>

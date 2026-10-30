@@ -9,8 +9,8 @@
  * 归一化方式不同。同一个控制器实例只能用其中一个：
  *
  *                     连续式              离散式（Ts 已折进增益）
- *   Ki_cont = Ki_disc * Ts          Ki_disc = Ki_cont / Ts
- *   Kd_cont = Kd_disc / Ts          Kd_disc = Kd_cont * Ts
+ *   Ki_cont = Ki_disc / Ts          Ki_disc = Ki_cont * Ts
+ *   Kd_cont = Kd_disc * Ts          Kd_disc = Kd_cont / Ts
  *   integral_max 单位 = 转速·秒      integral_max 单位 = 转速·拍
  *
  * 例：1kHz 速度环，先按连续式调出 Ki_cont、Kd_cont，要用离散式时再换算。

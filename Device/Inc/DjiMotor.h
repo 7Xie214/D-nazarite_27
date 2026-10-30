@@ -1,10 +1,9 @@
 /**
- * 大疆电机设备层（M3508+C620 / M2006+C610）。
+ * 大疆电机设备层（M3508+C620 / M2006+C610 / GM6020 电压控制）。
  *
- * 这两款电机在总线上是同一套协议：电流模式、收到 0x200（1~4 号）或
- * 0x1FF（5~8 号）里下发、反馈在 0x200+id、帧内布局完全一样。
- * 差别只有几个常数（减速比、命令量程、力矩系数），所以共用一份驱动，
- * 型号差异走 DjiMotor_Model_t 参数表 —— 不为每个型号抄一遍代码。
+ * 3508/2006：电流命令，控制帧 0x200 / 0x1FF，反馈 0x200+id。
+ * GM6020：电压命令，控制帧 0x1FF / 0x2FF，反馈 0x204+id。
+ * 型号参数保存各自的 ID 范围、反馈基址和控制帧，共用反馈解析与组帧代码。
  *
  * 分层：
  *   Device（本层）  电机语义：反馈解包、工程量换算、命令组帧
@@ -12,15 +11,12 @@
  *   algorithm/PID   只算数学，不认识电机
  *
  * ---------------------------------------------------------------------------
- * 线序（大端！和一般 CAN 报文习惯相反，抄代码时特别注意）
+ * 线序（高字节在前）
  *
- *   控制帧 0x200 / 0x1FF，8 字节装 4 台，每台 2 字节：
- *     data[0..1] = 1 号电机命令（高字节在前）
- *     data[2..3] = 2 号电机命令
- *     data[4..5] = 3 号电机命令
- *     data[6..7] = 4 号电机命令
+ *   每个控制帧 8 字节、4 个槽，每台 2 字节。
+ *   各型号 id 1~4 用第一组，id 5~8 用第二组（GM6020 最大 id 为 7）。
  *
- *   反馈帧 0x200+id，7 字节有效：
+ *   反馈帧前 7 字节有效：
  *     data[0..1] = 机械角度   0..8191，转子转一圈
  *     data[2..3] = 转速       rpm（也是转子侧，不是输出轴）
  *     data[4..5] = 实际电流   原始值
@@ -45,36 +41,40 @@
 
 #include "main.h"
 
-/* 一套协议最多 8 台（1~4 号一组，5~8 号一组） */
-#define DJI_MOTOR_MAX   8u
+/* 所有 CAN 总线合计的注册容量，不是电调 ID 上限。 */
+#define DJI_MOTOR_MAX   13u
 
 /* 转子编码器分辨率：8192 线/圈（角度反馈 0..8191） */
 #define DJI_COUNTS_PER_REV   8192.0f
 
 /* ============================ 型号参数表 ============================
- * 只读，一个型号一行。加新型号就在这里加一条，驱动代码一个字不用改。 */
+ * 只读。以下三款共用帧内布局，ID 和工程量差异放在参数表中。 */
 typedef struct {
     const char *name;
 
     float   gear_ratio;     /* 减速比。反馈的转速和角度都是【转子侧】，
                                除这个数才是输出轴上的量 */
 
-    int16_t cmd_max;        /* 命令量程。C620 是 ±16384，C610 是 ±10000，
-                               填错会让小电调被大电流指令顶爆 */
+    int16_t cmd_max;        /* C620 ±16384，C610 ±10000，GM6020 电压 ±30000 */
 
     float   nm_per_raw;     /* 反馈 raw 电流 → 输出轴 N·m。填 0 表示不换算，
                                此时 torque_nm 恒为 0。这个系数各批次固件不一样，
                                请按手册或实测标定后再填，别照抄。 */
+
+    uint16_t feedback_base; /* 反馈 ID = feedback_base + 电调 id */
+    uint16_t command_id[2]; /* id 1~4、id 5~8 的控制帧 ID */
+    uint8_t  max_id;        /* 3508/2006: 8；GM6020: 7，与注册容量无关 */
 } DjiMotor_Model_t;
 
 extern const DjiMotor_Model_t DJI_MODEL_3508;   /* M3508 + C620 */
 extern const DjiMotor_Model_t DJI_MODEL_2006;   /* M2006 + C610 */
+extern const DjiMotor_Model_t DJI_MODEL_6020;   /* GM6020，电压控制 ±30000 */
 
 /* ============================== 一台电机 ============================== */
 typedef struct {
     /* ---- 身份：注册时定死，之后不动 ---- */
     FDCAN_HandleTypeDef    *hfdcan;
-    uint8_t                 id;             /* 1..8，反馈 ID = 0x200 + id */
+    uint8_t                 id;             /* 电调硬件 ID，范围由型号决定 */
     const DjiMotor_Model_t *model;
 
     /* ---- 反馈：CAN 中断写，任务只读 ----
@@ -83,7 +83,7 @@ typedef struct {
     volatile int16_t  raw_speed;            /* rpm，转子侧 */
     volatile int16_t  raw_current;
     volatile uint8_t  raw_temp;             /* ℃ */
-    volatile uint32_t rx_tick;              /* 最后一帧的时刻 → 掉线判据 */
+    volatile uint32_t rx_tick;              /* 最后一帧 HAL_GetTick()，单位 ms */
     volatile uint32_t rx_count;
 
     /* ---- 工程量：DjiMotor_Update() 里算 ---- */
@@ -95,7 +95,7 @@ typedef struct {
     float   torque_nm;                      /* 输出轴力矩，nm_per_raw 为 0 时恒为 0 */
 
     /* ---- 命令：任务写，组帧时读 ---- */
-    int16_t cmd;                            /* 要下发的原始电流值 */
+    int16_t cmd;                            /* 原始命令：3508/2006 电流，6020 电压 */
 } DjiMotor_t;
 
 /* ================================ API ================================ */
@@ -104,25 +104,36 @@ typedef struct {
  * 非 static，应用层按需取用，Keil 的 Watch 窗口里也能直接看每台的状态。
  * 这台机构是 3508 还是 6020、挂在 CAN1 还是 CAN2，应用层不用关心 ——
  * 拿到指针就行，换总线只改 DjiMotor_Init() 里那一行。 */
-extern DjiMotor_t g_motor_3508_1;      /* 0x201 */
-extern DjiMotor_t g_motor_3508_2;      /* 0x202 */
-extern DjiMotor_t g_motor_3508_3;      /* 0x203 */
-extern DjiMotor_t g_motor_2006_1;      /* 0x204 */
-extern DjiMotor_t g_motor_2006_2;      /* 0x205 */
+/* 名字末尾的数字是实例编号，实际硬件 ID 以注册参数为准。 */
+extern DjiMotor_t g_motor_3508_1;      /* 上层：CAN3 ID5 */
+extern DjiMotor_t g_motor_3508_2;      /* 上层：CAN3 ID2 */
+extern DjiMotor_t g_motor_3508_3;      /* 上层：CAN3 ID1 */
+extern DjiMotor_t g_motor_3508_4;      /* 左前行走：CAN1 ID1 */
+extern DjiMotor_t g_motor_3508_5;      /* 右前行走：CAN2 ID4 */
+extern DjiMotor_t g_motor_3508_6;      /* 左后行走：CAN1 ID2 */
+extern DjiMotor_t g_motor_3508_7;      /* 右后行走：CAN2 ID3 */
+extern DjiMotor_t g_motor_2006_1;      /* 上层：CAN3 ID4 */
+extern DjiMotor_t g_motor_2006_2;      /* 上层：CAN3 ID3 */
+extern DjiMotor_t g_motor_6020_1;      /* 左前转向：CAN1 ID1 */
+extern DjiMotor_t g_motor_6020_2;      /* 左后转向：CAN1 ID2 */
+extern DjiMotor_t g_motor_6020_3;      /* 右后转向：CAN2 ID3 */
+extern DjiMotor_t g_motor_6020_4;      /* 右前转向：CAN2 ID4 */
 
-/* 注册失败累计次数（id 越界 / (总线,id) 撞车 / 表满）。
+/* 注册失败累计次数（id 越界 / 反馈 ID 冲突 / 实例重复 / 表满）。
  * 上电后在 Watch 里看一眼：0 = 全部注册成功。非 0 说明有轴永远不会收到
  * 反馈 —— 直接查电调的 id 设置和 DjiMotor_Init() 对不对得上。 */
 extern uint32_t g_djimotor_reg_fail;
 
-/* 注册一台电机到内部表。参数不合法（id 越界 / hfdcan 为空 / model 为空）
- * 或该 (总线, id) 已被占用时返回 NULL，并把 g_djimotor_reg_fail 加一。 */
+/* 启动时注册一次。参数不合法、实例重复、表满，或同总线反馈 ID 冲突时
+ * 返回 NULL，并把 g_djimotor_reg_fail 加一。
+ * 同路混用型号时按实际反馈 ID 判断冲突，例如 3508 id5 与 6020 id1 冲突。 */
 DjiMotor_t *DjiMotor_Register(DjiMotor_t *motor,
                               FDCAN_HandleTypeDef *hfdcan,
                               uint8_t id,
                               const DjiMotor_Model_t *model);
 
-/* 一次把本机所有电机注册好。清单写在 DjiMotor.c 里，改机器人改那里。 */
+/* main 在外设初始化后、CAN/RTOS 启动前调用一次，注册本机全部电机。
+ * 清单写在 DjiMotor.c 里；应用层初始化不得重复调用。 */
 void DjiMotor_Init(void);
 
 /* 中断上下文：CAN 回调转进来。只存 raw，不做换算。 */
@@ -135,12 +146,14 @@ void DjiMotor_OnCanFrame(FDCAN_HandleTypeDef *hfdcan,
  * 并处理角度回绕。每拍调一次，调完再取角度去做位置环。 */
 void DjiMotor_Update(DjiMotor_t *motor);
 
-/* 掉线判定：超过 DJI_MOTOR_TIMEOUT_MS 没收到反馈就算掉线 */
+/* 掉线判定：用 HAL 毫秒时钟，超过 50 ms 没收到反馈就算掉线。 */
 int DjiMotor_IsOnline(const DjiMotor_t *motor);
 
 /* 组帧发送。
- *   group 0 → 0x200，装 id 1~4
- *   group 1 → 0x1FF，装 id 5~8
+ *   group 0 → 0x200，装 3508/2006 id 1~4
+ *   group 1 → 0x1FF，装 3508/2006 id 5~8，以及 GM6020 id 1~4
+ *   group 2 → 0x2FF，装 GM6020 id 5~7
+ * 按实际 CAN 帧合并，不会将两种型号分别发帧而相互覆盖槽位。
  * 会顺手把 cmd 按型号量程限幅；掉线的电机按 0 发。
  * 该组一台电机都没注册时返回 HAL_ERROR，不会白发一帧空报文。 */
 HAL_StatusTypeDef DjiMotor_SendGroup(FDCAN_HandleTypeDef *hfdcan, uint8_t group);

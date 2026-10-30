@@ -40,12 +40,5 @@ nazarite_27_upstairs\djimotor.o: ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_h
 nazarite_27_upstairs\djimotor.o: ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_hal_uart.h
 nazarite_27_upstairs\djimotor.o: ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_hal_uart_ex.h
 nazarite_27_upstairs\djimotor.o: ../BSP/Inc/My_CAN.h
+nazarite_27_upstairs\djimotor.o: ../Test/Inc/Encoder_Test.h
 nazarite_27_upstairs\djimotor.o: ../Core/Inc/fdcan.h
-nazarite_27_upstairs\djimotor.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/FreeRTOS.h
-nazarite_27_upstairs\djimotor.o: ../Core/Inc/FreeRTOSConfig.h
-nazarite_27_upstairs\djimotor.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/projdefs.h
-nazarite_27_upstairs\djimotor.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/portable.h
-nazarite_27_upstairs\djimotor.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/deprecated_definitions.h
-nazarite_27_upstairs\djimotor.o: ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F/portmacro.h
-nazarite_27_upstairs\djimotor.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/mpu_wrappers.h
-nazarite_27_upstairs\djimotor.o: ../Drivers/CMSIS/RTOS2/Include/cmsis_os2.h

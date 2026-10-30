@@ -1,11 +1,13 @@
 /** @brief 四舵轮逆运动学实现，接口及坐标约定见 Swerve.h。 */
 #include "Swerve.h"
 
+#include <float.h>
 #include <math.h>
 
 #define SWERVE_PI       3.14159265358979323846f
 #define SWERVE_TWO_PI   (2.0f * SWERVE_PI)
 #define SWERVE_HALF_PI  (0.5f * SWERVE_PI)
+#define SWERVE_ANGLE_ROUNDOFF_RAD (4.0f * FLT_EPSILON)
 
 /* 有界时间归一化，避免跨圈反馈导致循环减 2*pi。调用前确保 angle 有限。 */
 static float wrap_angle(float angle)
@@ -19,14 +21,60 @@ static float wrap_angle(float angle)
     return wrapped;
 }
 
-static int module_is_valid(const Swerve_Module_t *module)
+static int select_limited_angle(const Swerve_Module_t *module,
+                                 float heading,
+                                 float magnitude,
+                                 float *angle,
+                                 float *speed)
 {
-    return isfinite(module->half_wheel_base) &&
-           isfinite(module->half_track_width) &&
-           (module->half_wheel_base >= 0.0f) &&
-           (module->half_track_width >= 0.0f) &&
-           isfinite(module->actual_angle_rad) &&
-           isfinite(module->target_angle_rad);
+    float minimum, maximum;
+    float best_distance = 0.0f;
+    int found = 0;
+    int k;
+
+    if (module->angle_range == SWERVE_ANGLE_MINUS_90_TO_90) {
+        minimum = -SWERVE_HALF_PI;
+        maximum = SWERVE_HALF_PI;
+    } else if (module->angle_range == SWERVE_ANGLE_0_TO_180) {
+        minimum = 0.0f;
+        maximum = SWERVE_PI;
+    } else {
+        return 0;
+    }
+    if ((module->actual_angle_rad < minimum) || (module->actual_angle_rad > maximum) ||
+        (module->target_angle_rad < minimum) || (module->target_angle_rad > maximum)) {
+        return 0;
+    }
+    if (magnitude <= SWERVE_SPEED_EPS_MPS) {
+        *angle = module->target_angle_rad;
+        *speed = 0.0f;
+        return 1;
+    }
+    /* atan2 的范围是 [-pi, pi]，这五个候选覆盖两种半圈机械范围。 */
+    for (k = -2; k <= 2; k++) {
+        float candidate = heading + (float)k * SWERVE_PI;
+        const float candidate_speed = ((k % 2) != 0) ? -magnitude : magnitude;
+        float distance;
+        /* atan2/加 pi 的舍入可能让端点偏离几个 ULP，仅消除这一数值误差。
+         * 实际反馈与上次目标仍严格验界，不会在此归一化或钳位反馈。 */
+        if (fabsf(candidate - minimum) <= SWERVE_ANGLE_ROUNDOFF_RAD) {
+            candidate = minimum;
+        } else if (fabsf(candidate - maximum) <= SWERVE_ANGLE_ROUNDOFF_RAD) {
+            candidate = maximum;
+        }
+        if ((candidate < minimum) || (candidate > maximum)) {
+            continue;
+        }
+        distance = fabsf(candidate - module->actual_angle_rad);
+        if ((found == 0) || (distance < best_distance) ||
+            ((distance == best_distance) && (candidate_speed > 0.0f) && (*speed < 0.0f))) {
+            *angle = candidate;
+            *speed = candidate_speed;
+            best_distance = distance;
+            found = 1;
+        }
+    }
+    return found;
 }
 
 static int calculate_module(const Swerve_Module_t *module,
@@ -45,12 +93,18 @@ static int calculate_module(const Swerve_Module_t *module,
     const float wheel_vy = vy + wz * x;
     float delta;
 
-    if (!isfinite(wheel_vx) || !isfinite(wheel_vy)) {
+    *speed = hypotf(wheel_vx, wheel_vy);
+    //小数点判断
+    /* 非有限几何尺寸或速度会传播到轮速，统一在这里检查。 */
+    if ((module->half_wheel_base < 0.0f) || (module->half_track_width < 0.0f) ||
+        !isfinite(*speed) || !isfinite(module->actual_angle_rad) ||
+        !isfinite(module->target_angle_rad)) {
         return 0;
     }
-    *speed = hypotf(wheel_vx, wheel_vy);
-    if (!isfinite(*speed)) {
-        return 0;
+    if (module->angle_range != SWERVE_ANGLE_CONTINUOUS) {
+        /* 先满足机械限位；不能在此之后再套用连续模式的最短角优化。 */
+        return select_limited_angle(module, atan2f(wheel_vy, wheel_vx), *speed,
+                                    angle, speed);
     }
     if (*speed <= SWERVE_SPEED_EPS_MPS) {
         *angle = module->target_angle_rad;
@@ -89,8 +143,7 @@ Swerve_Status_t Swerve_Calculate(Swerve_Module_t *modules,
 
     /* 所有计算先写暂存区：任何一个轮组出错都不会留下半更新的整车目标。 */
     for (i = 0u; i < SWERVE_MODULE_COUNT; i++) {
-        if (!module_is_valid(&modules[i]) ||
-            !calculate_module(&modules[i], i, vx_mps, vy_mps, wz_rad_s,
+        if (!calculate_module(&modules[i], i, vx_mps, vy_mps, wz_rad_s,
                                &angles[i], &speeds[i])) {
             return SWERVE_ERR_PARAM;
         }

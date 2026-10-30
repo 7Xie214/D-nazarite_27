@@ -28,6 +28,7 @@
 /* USER CODE BEGIN Includes */
 #include "Communicate.h"
 #include "My_task.h"
+#include "ChassisTask.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -70,6 +71,13 @@ const osThreadAttr_t Upstairs_Task_attributes = {
   .stack_size = 256 * 4,
   .priority = (osPriority_t) osPriorityHigh2,
 };
+/* Definitions for Chassis_Task */
+osThreadId_t Chassis_TaskHandle;
+const osThreadAttr_t Chassis_Task_attributes = {
+  .name = "Chassis_Task",
+  .stack_size = 384 * 4,
+  .priority = (osPriority_t) osPriorityHigh2,
+};
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -79,6 +87,7 @@ const osThreadAttr_t Upstairs_Task_attributes = {
 void StartDefaultTask(void *argument);
 void Bluer_Da_analyz_Hander(void *argument);
 void Upstairs_Task_Hander(void *argument);
+void Chassis_Task_Hander(void *argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
@@ -117,6 +126,9 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of Upstairs_Task */
   Upstairs_TaskHandle = osThreadNew(Upstairs_Task_Hander, NULL, &Upstairs_Task_attributes);
+
+  /* creation of Chassis_Task */
+  Chassis_TaskHandle = osThreadNew(Chassis_Task_Hander, NULL, &Chassis_Task_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -183,6 +195,20 @@ void Upstairs_Task_Hander(void *argument)
     
   }
   /* USER CODE END Upstairs_Task_Hander */
+}
+
+/* USER CODE BEGIN Header_Chassis_Task_Hander */
+/**
+* @brief Function implementing the Chassis_Task thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_Chassis_Task_Hander */
+void Chassis_Task_Hander(void *argument)
+{
+  /* USER CODE BEGIN Chassis_Task_Hander */
+  ChassisTask(argument);
+  /* USER CODE END Chassis_Task_Hander */
 }
 
 /* Private application code --------------------------------------------------*/

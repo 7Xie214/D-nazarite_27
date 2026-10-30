@@ -24,7 +24,8 @@
 /* ================================ API ================================= */
 
 /* 注册一个串口实例并启动循环 DMA 接收。对同一个 handle 重复调用是幂等的。
- * 必须在 MX_USARTx_UART_Init() 之后调用。
+ * 必须在 MX_USARTx_UART_Init() 之后、调度器启动后的任务中调用。
+ * 内部创建 FreeRTOS 信号量；裸机测试不能调用本接口。
  * 池满时返回 HAL_ERROR。 */
 HAL_StatusTypeDef BSP_USART_Init(UART_HandleTypeDef *huart);
 

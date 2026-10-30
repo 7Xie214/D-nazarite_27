@@ -227,6 +227,13 @@ void Communicate_Task(void *argument)
         }
     }
 
+    /* BSP 内部创建信号量，放在任务入口，避免裸机测试时屏蔽 HAL tick。 */
+    if (BSP_USART_Init(ctx->huart) != HAL_OK) {
+        for (;;) {
+            osDelay(1000u);
+        }
+    }
+
     for (;;) {
 
         /* 读到至少 1 字节才返回。用 osWaitForever 而不是固定超时：
