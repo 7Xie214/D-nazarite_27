@@ -51,14 +51,16 @@
 
 #include "PID_Config.h"
 
-/* No assumed travel speed or tuned gains. C620 current range is fixed. */
+/* 双前轮3508试调值：位置/速度为输出轴rad/rad/s，内环输出C620原始电流。
+ * 公共轨迹使用下方 MOTORPAIR_CFG_CHASSIS_FRONT；这两份 traj_v/a 仅供旧独立轴API。
+ * 不是实测带载调参值；不改上层CAN3或用户已调好的6020参数。 */
 const Axis_Cfg_t CHASSIS_FRONT_MOVE_CFG[2] = {
     { /* FL */
         .cascade = {
-            .pos_kp = 0.0f, .pos_ki = 0.0f,
-            .pos_integral_max = 0.0f, .pos_speed_limit = 0.0f,
-            .spd_kp = 0.0f, .spd_ki = 0.0f, .spd_kd = 0.0f,
-            .spd_integral_max = 0.0f, .spd_out_max = 16384.0f,
+            .pos_kp = 18.0f, .pos_ki = 0.0f,
+            .pos_integral_max = 0.0f, .pos_speed_limit = 12.0f,
+            .spd_kp = 1467.0171f, .spd_ki = 2200.5256f, .spd_kd = 0.0f,
+            .spd_integral_max = (4000.0f / 2200.5256f), .spd_out_max = 16384.0f,
             .spd_d_alpha = 1.0f, .spd_anti_windup = PID_AW_COND,
             .spd_integ_sep_thr = 0.0f
         },
@@ -66,10 +68,10 @@ const Axis_Cfg_t CHASSIS_FRONT_MOVE_CFG[2] = {
     },
     { /* FR */
         .cascade = {
-            .pos_kp = 0.0f, .pos_ki = 0.0f,
-            .pos_integral_max = 0.0f, .pos_speed_limit = 0.0f,
-            .spd_kp = 0.0f, .spd_ki = 0.0f, .spd_kd = 0.0f,
-            .spd_integral_max = 0.0f, .spd_out_max = 16384.0f,
+            .pos_kp = 18.0f, .pos_ki = 0.0f,
+            .pos_integral_max = 0.0f, .pos_speed_limit = 12.0f,
+            .spd_kp = 1467.0171f, .spd_ki = 2200.5256f, .spd_kd = 0.0f,
+            .spd_integral_max = (4000.0f / 2200.5256f), .spd_out_max = 16384.0f,
             .spd_d_alpha = 1.0f, .spd_anti_windup = PID_AW_COND,
             .spd_integ_sep_thr = 0.0f
         },
@@ -77,14 +79,24 @@ const Axis_Cfg_t CHASSIS_FRONT_MOVE_CFG[2] = {
     }
 };
 
-/* Four chassis wheels: no tuned gains or assumed steering speed limit. */
+const MotorPair_Cfg_t MOTORPAIR_CFG_CHASSIS_FRONT = {
+    .traj_v_max = 6.0f,         /* 公共输出轴rad/s */
+    .traj_a_max = 12.0f,        /* 公共输出轴rad/s² */
+    .sync_kp = 2.0f,           /* 归一化轮位差(rad) -> 纠偏速度(rad/s) */
+    .sync_speed_max = 1.0f,    /* 只限同步纠偏 */
+    .command_a_max = 60.0f     /* 最终轮速命令斜率(rad/s²) */
+};
+
+/* FL/FR GM6020 mechanical-zero hold trial: position rad, speed rad/s,
+ * output raw VOLTAGE. P/P initial values are not measured/tuned gains.
+ * Rear steering starts with the same gains; drive-speed gains remain unconfigured. */
 const Chassis_PID_Cfg_t CHASSIS_PID_CFG[4] = {
-    { /* FL: tune independently; steering position speed limit is rad/s. */
+    { /* FL: CAN1 GM6020 ID1; voltage command capped at 80% of 30000. */
         .steer = {
-            .pos_kp = 0.0f, .pos_ki = 0.0f,
-            .pos_integral_max = 0.0f, .pos_speed_limit = 0.0f,
-            .spd_kp = 0.0f, .spd_ki = 0.0f, .spd_kd = 0.0f,
-            .spd_integral_max = 0.0f, .spd_out_max = 30000.0f,
+            .pos_kp = 16.0f, .pos_ki = 2.0f,
+            .pos_integral_max = 20.0f, .pos_speed_limit = 25.0f,
+            .spd_kp = 3000.0f, .spd_ki = 100.0f, .spd_kd = 0.0f,
+            .spd_integral_max = 18000.0f, .spd_out_max = 24000.0f,
             .spd_d_alpha = 1.0f, .spd_anti_windup = PID_AW_COND,
             .spd_integ_sep_thr = 0.0f
         },
@@ -95,12 +107,12 @@ const Chassis_PID_Cfg_t CHASSIS_PID_CFG[4] = {
             .integ_sep_thr = 0.0f
         }
     },
-    { /* FR: tune independently; steering position speed limit is rad/s. */
+    { /* FR: CAN2 GM6020 ID4; voltage command capped at 80% of 30000. */
         .steer = {
-            .pos_kp = 0.0f, .pos_ki = 0.0f,
-            .pos_integral_max = 0.0f, .pos_speed_limit = 0.0f,
-            .spd_kp = 0.0f, .spd_ki = 0.0f, .spd_kd = 0.0f,
-            .spd_integral_max = 0.0f, .spd_out_max = 30000.0f,
+            .pos_kp = 16.0f, .pos_ki = 2.0f,
+            .pos_integral_max = 20.0f, .pos_speed_limit = 25.0f,
+            .spd_kp = 3000.0f, .spd_ki = 100.0f, .spd_kd = 0.0f,
+            .spd_integral_max = 18000.0f, .spd_out_max = 24000.0f,
             .spd_d_alpha = 1.0f, .spd_anti_windup = PID_AW_COND,
             .spd_integ_sep_thr = 0.0f
         },
@@ -111,12 +123,12 @@ const Chassis_PID_Cfg_t CHASSIS_PID_CFG[4] = {
             .integ_sep_thr = 0.0f
         }
     },
-    { /* RL: tune independently; steering position speed limit is rad/s. */
+    { /* RL: CAN1 GM6020 ID2; same initial steering gains as the front. */
         .steer = {
-            .pos_kp = 0.0f, .pos_ki = 0.0f,
-            .pos_integral_max = 0.0f, .pos_speed_limit = 0.0f,
-            .spd_kp = 0.0f, .spd_ki = 0.0f, .spd_kd = 0.0f,
-            .spd_integral_max = 0.0f, .spd_out_max = 30000.0f,
+            .pos_kp = 16.0f, .pos_ki = 2.0f,
+            .pos_integral_max = 20.0f, .pos_speed_limit = 25.0f,
+            .spd_kp = 3000.0f, .spd_ki = 100.0f, .spd_kd = 0.0f,
+            .spd_integral_max = 18000.0f, .spd_out_max = 24000.0f,
             .spd_d_alpha = 1.0f, .spd_anti_windup = PID_AW_COND,
             .spd_integ_sep_thr = 0.0f
         },
@@ -127,12 +139,12 @@ const Chassis_PID_Cfg_t CHASSIS_PID_CFG[4] = {
             .integ_sep_thr = 0.0f
         }
     },
-    { /* RR: tune independently; steering position speed limit is rad/s. */
+    { /* RR: CAN2 GM6020 ID3; same initial steering gains as the front. */
         .steer = {
-            .pos_kp = 0.0f, .pos_ki = 0.0f,
-            .pos_integral_max = 0.0f, .pos_speed_limit = 0.0f,
-            .spd_kp = 0.0f, .spd_ki = 0.0f, .spd_kd = 0.0f,
-            .spd_integral_max = 0.0f, .spd_out_max = 30000.0f,
+            .pos_kp = 16.0f, .pos_ki = 2.0f,
+            .pos_integral_max = 20.0f, .pos_speed_limit = 25.0f,
+            .spd_kp = 3000.0f, .spd_ki = 100.0f, .spd_kd = 0.0f,
+            .spd_integral_max = 18000.0f, .spd_out_max = 24000.0f,
             .spd_d_alpha = 1.0f, .spd_anti_windup = PID_AW_COND,
             .spd_integ_sep_thr = 0.0f
         },

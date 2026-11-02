@@ -31,6 +31,7 @@
 #include "Chassis.h"
 #include "DjiMotor.h"
 #include "Motor_Test.h"
+#include "Encoder_Test.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -173,14 +174,20 @@ int main(void)
 #if MOTOR_CURRENT_TEST_ONLY
   /* GM6020 电压开环测试：左前 CAN1 ID1，测试期间不启动控制任务。
    * 3508/2006 测试改用 Test_MotorCurrent()。 */
-  for (;;) {
-    g_test_motor_send_status = Test_MotorCurrent(&hfdcan3, 3, -2000);
-    g_test_motor_send_status = Test_MotorCurrent(&hfdcan3, 4, 2000);
-    g_test_motor_send_count++;
+  // for (;;) {
+  //   g_test_motor_send_status = Test_MotorCurrent(&hfdcan3, 3, -2000);
+  //   g_test_motor_send_status = Test_MotorCurrent(&hfdcan3, 4, 2000);
+  //   g_test_motor_send_count++;
+  //   HAL_Delay(10);
+  //   (void)HAL_FDCAN_GetProtocolStatus(&hfdcan1, &g_test_can1_protocol);
+  //   (void)HAL_FDCAN_GetErrorCounters(&hfdcan1, &g_test_can1_counters);
+  // }
+
+  Test_EncoderCalibrate(&hfdcan1, &hfdcan2, 1u, 2u, 3u, 4u);
+
+while (1) {
     HAL_Delay(10);
-    (void)HAL_FDCAN_GetProtocolStatus(&hfdcan1, &g_test_can1_protocol);
-    (void)HAL_FDCAN_GetErrorCounters(&hfdcan1, &g_test_can1_counters);
-  }
+}
 #else
   /* USER CODE END 2 */
 

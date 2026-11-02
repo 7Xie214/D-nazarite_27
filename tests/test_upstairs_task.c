@@ -1,5 +1,16 @@
 /* First-stair ordering and second-stair first move. Full second stair has a separate fixture. */
 #include "My_task.h"
+#include "ChassisTask.h"
+osStatus_t ChassisTask_RequestFrontMove(void) { return osErrorResource; }
+osStatus_t ChassisTask_RequestFrontMoveWithPause(float l, float r, float p)
+{ (void)l; (void)r; (void)p; return osErrorResource; }
+osStatus_t ChassisTask_ResumeFrontMove(uint32_t sequence)
+{ (void)sequence; return osErrorResource; }
+uint32_t ChassisTask_GetFrontProgress(float actual[2])
+{ actual[0] = 0.0f; actual[1] = 0.0f; return 0u; }
+osStatus_t ChassisTask_RequestFrontMoveTurns(float left, float right)
+{ (void)left; (void)right; return osErrorResource; }
+uint32_t ChassisTask_PollReply(void) { return 0u; }
 #include "MotorApp.h"
 #include <setjmp.h>
 #include <stdio.h>

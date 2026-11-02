@@ -26,6 +26,11 @@ static inline void __set_PRIMASK(uint32_t mask) { test_irq_mask = mask; }
     $taskExe = Join-Path $taskBuildDir 'test_chassis_app.exe'
     foreach ($taskCase in @('default', 'configured', 'disabled', 'mecanum', 'omni')) {
         $taskConf = $taskOriginalConf
+        # Legacy solver fixtures feed raw0 as mechanical zero; keep their synthetic
+        # calibration separate from the user's measured installation offsets.
+        foreach ($taskCorner in @('FL','FR','RL','RR')) {
+            $taskConf = $taskConf -replace ('(?m)^#define CHASSIS_SWERVE_'+$taskCorner+'_ZERO_OFFSET .*'), ('#define CHASSIS_SWERVE_'+$taskCorner+'_ZERO_OFFSET 0u')
+        }
         if ($taskCase -eq 'configured') {
             foreach ($taskPair in @(
                 @('CHASSIS_SWERVE_WHEEL_RADIUS_M', '0.1f'),

@@ -1,4 +1,5 @@
 #include "MotorApp.h"
+#include "PID_Config.h"
 #include "My_CAN.h"
 #include "Encoder_Test.h"
 #include <math.h>
@@ -44,7 +45,34 @@ int main(int argc, char **argv)
     MotorApp_Init();
     for (i = 0u; i < 5u; i++) { feedback(i, 0u, 0); }
     MotorApp_Update(0.001f);
-    if (strcmp(argv[1], "speed_units") == 0) {
+    if (strcmp(argv[1], "id2_window") == 0) {
+        Axis_t *axis = MotorApp_GetAxis(1u);
+        float k = 6.28318530718f / axis->motor->model->gear_ratio;
+        float distance = 17.402660f * k, id2_distance = 31.6812f * k;
+        Traj_t front, old_id2, fast_id2;
+        unsigned int t35 = 0u, t75 = 0u, old_ms = 0u, fast_ms = 0u;
+        float peak = 0.0f;
+        Traj_Init(&front, MOTORPAIR_CFG_CHASSIS_FRONT.traj_v_max, MOTORPAIR_CFG_CHASSIS_FRONT.traj_a_max);
+        Traj_Start(&front, 0.0f, distance);
+        for (n = 1u; n < 10000u && front.active; n++) {
+            Traj_Update(&front, 0.001f);
+            if (!t35 && front.pos_ref >= distance*0.35f) { t35 = n; }
+            if (!t75 && front.pos_ref >= distance*0.75f) { t75 = n; }
+        }
+        Traj_Init(&old_id2, axis->traj.v_max, axis->traj.a_max);
+        Traj_Start(&old_id2, 0.0f, id2_distance);
+        while (old_id2.active && old_ms < 10000u) { Traj_Update(&old_id2,0.001f); old_ms++; }
+        Traj_Init(&fast_id2, UPSTAIRS_ID2_LINK_V_MAX_RAD_S, UPSTAIRS_ID2_LINK_A_MAX_RAD_S2);
+        Traj_Start(&fast_id2, 0.0f, id2_distance);
+        while (fast_id2.active && fast_ms < 10000u) {
+            Traj_Update(&fast_id2,0.001f); fast_ms++;
+            if (fast_id2.vel_ref > peak) { peak = fast_id2.vel_ref; }
+        }
+        CHECK(t35 > 0u && t75 > t35);
+        CHECK(fast_id2.active == 0u && peak <= axis->cascade.pos.out_max);
+        printf("ID2 unpaused baseline: front35=%ums, front75=%ums, window=%ums; old=%ums, fast=%ums\n",
+            t35,t75,t75-t35,old_ms,fast_ms);
+    } else if (strcmp(argv[1], "speed_units") == 0) {
         const float peaks[3] = {20.0f, 4.2f, 20.0f}; /* Faster shared moves / ID5 single reference. */
         for (i = 0u; i < 3u; i++) {
             Cascade_t control = MotorApp_GetAxis((uint8_t)i)->cascade;
@@ -60,6 +88,18 @@ int main(int argc, char **argv)
             CHECK(fabsf(control.spd.setpoint - peaks[i]) < 1e-5f);
             CHECK(fabsf(output) < 0.02f); /* No clipping of the faster feedforward speed. */
         }
+    } else if (strcmp(argv[1], "idle_drift") == 0) {
+        Axis_t *axis = MotorApp_GetAxis(1u);
+        CHECK(MotorApp_MoveTurns(axis, 0.0f) == MOTORAPP_OK);
+        for (i = 0u; i < 100u; i++) { stationary(); }
+        CHECK(axis->state == AXIS_IDLE);
+        tick++;
+        for (i = 0u; i < 5u; i++) { feedback(i, i == 1u ? 4096u : 0u, i == 1u ? 30 : 0); }
+        MotorApp_Update(0.001f);
+        CHECK(axis->state == AXIS_IDLE); /* Completion latches while holding corrects drift. */
+        CHECK(fabsf(axis->traj.target - axis->motor->angle_rad) * axis->motor->model->gear_ratio /
+              6.28318530718f > MOTORAPP_POSITION_TOLERANCE_ROTOR_TURNS);
+        CHECK(axis->motor->raw_speed == 30 && axis->motor->cmd != 0);
     } else if (strcmp(argv[1], "lift_fast") == 0) {
         const float lift_turns[4] = {-20.0f, 20.0f, -35.0f, 35.0f};
         Axis_t *axis = MotorApp_GetAxis(0u);

@@ -76,7 +76,7 @@ osThreadId_t Chassis_TaskHandle;
 const osThreadAttr_t Chassis_Task_attributes = {
   .name = "Chassis_Task",
   .stack_size = 384 * 4,
-  .priority = (osPriority_t) osPriorityHigh2,
+  .priority = (osPriority_t) osPriorityHigh1,
 };
 
 /* Private function prototypes -----------------------------------------------*/

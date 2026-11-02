@@ -49,6 +49,27 @@ typedef struct {
 } ChassisFront_Axis_t;
 
 extern ChassisFront_Axis_t g_chassis_front_axes[2];
+
+/* FL/FR observation: signed travel/errors are PRE-reduction rotor turns. */
+typedef struct {
+    float actual_turns[2];
+    float error_turns[2];
+    float speed_command_rpm[2];
+    float reference_turns;
+    float sync_error_turns;
+    float correction_rad_s;
+    uint32_t start_ms;
+    uint32_t elapsed_ms;
+    uint8_t planner_active;
+    uint8_t finish_motor_id;
+    uint8_t fault_motor_id;
+    uint32_t move_sequence;      /* 每次成功接受新行程递增，区分上一次的进度。 */
+    float pause_fraction;        /* 0=不停；指定比例处规划停稳，终点仍为原目标。 */
+    uint8_t paused;
+    uint32_t pause_ms;
+    uint32_t resume_ms;
+} ChassisFrontPair_Status_t;
+extern ChassisFrontPair_Status_t g_chassis_front_pair;
 #endif
 
 typedef enum {
@@ -69,6 +90,23 @@ void ChassisApp_SetVelocity(float vx, float vy, float wz);
 void ChassisApp_Update(float dt);
 /* Alternative task entry: never call both updates in the same cycle. */
 void ChassisApp_UpdateFrontMove(float dt);
+/* ChassisTask only: FL/FR mechanical zero hold, no drive/rear feedback required. */
+void ChassisApp_UpdateFrontSteerHold(float dt);
+/* ChassisTask steering-only mode: FL/FR/RL zero holds; RR voltage stays zero. */
+void ChassisApp_UpdateSteerHold(float dt);
+/* Paired front-drive alternative; holds FL/FR/RL GM6020 zero, releases RR.
+ * Rear-steering faults stay local and do not add front-drive readiness gates.
+ * Before the first accepted request, drive feedback updates but drive PID is
+ * inactive and both 3508 commands stay zero. DONE holds after an actual move.
+ * Request signs follow RAW motor rotor feedback, before reduction. Equal
+ * absolute travel only; either side in tolerance ends the pair and rebases holds. */
+void ChassisApp_UpdateFrontPair(float dt);
+ChassisFront_StartResult_t ChassisApp_MoveFrontPairTurns(float left_rotor_turns,
+                                                       float right_rotor_turns);
+ChassisFront_StartResult_t ChassisApp_MoveFrontPairTurnsWithPause(float left_rotor_turns,
+                                                               float right_rotor_turns,
+                                                               float pause_fraction);
+int ChassisApp_ResumeFrontPair(void); /* 仅停稳暂停时恢复，成功返回1。 */
 /* Chassis task only. Relative motor-rotor turns, before gearbox reduction. */
 ChassisFront_StartResult_t ChassisApp_MoveFrontTurns(float left_rotor_turns,
                                                    float right_rotor_turns);

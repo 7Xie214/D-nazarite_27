@@ -13,6 +13,9 @@ osThreadId_t Chassis_TaskHandle = (osThreadId_t)1;
 osThreadId_t Upstairs_TaskHandle = (osThreadId_t)2;
 ChassisFront_State_t g_chassis_front_state;
 ChassisApp_Status_t g_chassis_app_status;
+#if CHASSIS_ENABLE_SWERVE
+ChassisFrontPair_Status_t g_chassis_front_pair;
+#endif
 
 #define CHECK(condition) do { checks++; if (!(condition)) { \
     printf("FAIL line %d: %s\n", __LINE__, #condition); failures++; } } while (0)
@@ -39,11 +42,24 @@ void ChassisApp_UpdateFrontMove(float dt)
     if (update_calls == 1u) { now_tick += overrun; }
     if (update_calls == 3u) { longjmp(task_exit, 1); }
 }
+void ChassisApp_UpdateFrontSteerHold(float dt)
+{
+    ChassisApp_UpdateFrontMove(dt);
+}
+void ChassisApp_UpdateSteerHold(float dt) { ChassisApp_UpdateFrontMove(dt); }
+void ChassisApp_UpdateFrontPair(float dt) { ChassisApp_UpdateFrontMove(dt); }
 ChassisFront_StartResult_t ChassisApp_MoveFrontTurns(float left, float right)
 {
     (void)left; (void)right;
     return CHASSIS_FRONT_START_NOT_READY;
 }
+ChassisFront_StartResult_t ChassisApp_MoveFrontPairTurns(float left, float right)
+{
+    return ChassisApp_MoveFrontTurns(left, right);
+}
+ChassisFront_StartResult_t ChassisApp_MoveFrontPairTurnsWithPause(float l, float r, float p)
+{ (void)p; return ChassisApp_MoveFrontPairTurns(l, r); }
+int ChassisApp_ResumeFrontPair(void) { return 0; }
 uint32_t osThreadFlagsWait(uint32_t flags, uint32_t options, uint32_t timeout)
 {
     (void)flags; (void)options;
@@ -75,6 +91,10 @@ static void run_case(uint32_t start, uint32_t hz, uint32_t busy, uint32_t late)
 int main(void)
 {
 #if CHASSIS_ENABLE_SWERVE
+#if !CHASSIS_TASK_FRONT_MOVE_ENABLE
+    CHECK(ChassisTask_RequestFrontMove() == osErrorResource);
+    CHECK(ChassisTask_PollReply() == 0u);
+#endif
     run_case(10u, 1000u, 0u, 0u);
     run_case(UINT32_MAX - 1u, 1000u, 0u, 0u);
     run_case(10u, 1000u, 3u, 0u);

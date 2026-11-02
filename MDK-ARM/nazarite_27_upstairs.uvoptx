@@ -173,12 +173,12 @@
         <Ww>
           <count>3</count>
           <WinNumber>1</WinNumber>
-          <ItemText>g_upstairs_debug</ItemText>
+          <ItemText>g_upstairs_debug.pair_2006</ItemText>
         </Ww>
         <Ww>
           <count>4</count>
           <WinNumber>1</WinNumber>
-          <ItemText>g_upstairs_debug.pair_2006</ItemText>
+          <ItemText>g_upstairs_debug.timing</ItemText>
         </Ww>
         <Ww>
           <count>5</count>
@@ -188,12 +188,32 @@
         <Ww>
           <count>6</count>
           <WinNumber>1</WinNumber>
-          <ItemText>g_upstairs_debug.pair_2006</ItemText>
+          <ItemText>g_motor_2006_1.rx_count</ItemText>
         </Ww>
         <Ww>
           <count>7</count>
           <WinNumber>1</WinNumber>
-          <ItemText>g_upstairs_debug.timing</ItemText>
+          <ItemText>g_motor_2006_2.rx_count</ItemText>
+        </Ww>
+        <Ww>
+          <count>8</count>
+          <WinNumber>1</WinNumber>
+          <ItemText>g_motor_2006_1</ItemText>
+        </Ww>
+        <Ww>
+          <count>9</count>
+          <WinNumber>1</WinNumber>
+          <ItemText>g_motor_2006_2</ItemText>
+        </Ww>
+        <Ww>
+          <count>10</count>
+          <WinNumber>1</WinNumber>
+          <ItemText>g_upstairs_debug.state</ItemText>
+        </Ww>
+        <Ww>
+          <count>11</count>
+          <WinNumber>1</WinNumber>
+          <ItemText>g_upstairs_debug.fourth_stair.status</ItemText>
         </Ww>
       </WatchWindow1>
       <Tracepoint>

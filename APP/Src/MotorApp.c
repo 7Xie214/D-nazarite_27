@@ -272,8 +272,12 @@ static void pair_fault(MotorApp_PairFault_t reason)
     Traj_Stop(&s_pair_traj);
     for (i = 0u; i < 2u; i++) {
         Axis_t *a = &s_axis[s_pair_axis[i]];
-        uint32_t last_rx_tick = a->motor->rx_tick;
-        s_pair_status.fault_rx_age_ms[i] = HAL_GetTick() - last_rx_tick;
+        uint32_t last_rx_tick, now;
+        do {
+            last_rx_tick = a->motor->rx_tick;
+            now = HAL_GetTick();
+        } while (last_rx_tick != a->motor->rx_tick);
+        s_pair_status.fault_rx_age_ms[i] = now - last_rx_tick;
         s_pair_status.fault_rx_count[i] = a->motor->rx_count;
         s_pair_status.fault_command[i] = a->motor->cmd;
         Traj_Stop(&a->traj);

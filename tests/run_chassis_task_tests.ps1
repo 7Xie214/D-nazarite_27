@@ -1,4 +1,4 @@
-param([string]$Compiler = 'gcc')
+param([string]$Compiler = 'gcc', [switch]$Optimize)
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
 $taskDir = Join-Path ([IO.Path]::GetTempPath()) ('chassis-task-tests-' + [guid]::NewGuid())
@@ -37,15 +37,22 @@ uint32_t osThreadFlagsSet(osThreadId_t thread, uint32_t flags);
     Copy-Item -LiteralPath (Join-Path $taskRoot 'Chassis/Inc/Chassis.h') -Destination $taskDir
     $taskConf = [IO.File]::ReadAllText((Join-Path $taskRoot 'Chassis/Inc/Chassis_Conf.h'))
     $taskExe = Join-Path $taskDir 'test_chassis_task.exe'
-    foreach ($taskCase in @('swerve', 'reserved')) {
+    foreach ($taskCase in @('hold', 'swerve', 'reserved')) {
         $taskCaseConf = $taskConf
+        if ($taskCase -eq 'hold') {
+            $taskCaseConf = $taskCaseConf -replace '(?m)^#define CHASSIS_TASK_FRONT_MOVE_ENABLE .*', '#define CHASSIS_TASK_FRONT_MOVE_ENABLE 0'
+        }
         if ($taskCase -eq 'reserved') {
             $taskCaseConf = $taskConf -replace '(?m)^#define CHASSIS_ENABLE_SWERVE .*', '#define CHASSIS_ENABLE_SWERVE 0'
+        }
+        if ($taskCase -eq 'swerve') {
+            $taskCaseConf = $taskCaseConf -replace '(?m)^#define CHASSIS_TASK_FRONT_MOVE_ENABLE .*', '#define CHASSIS_TASK_FRONT_MOVE_ENABLE 1'
         }
         $taskCaseConf = $taskCaseConf -replace '(?m)^#define CHASSIS_FRONT_LEFT_MOVE_ROTOR_TURNS .*', '#define CHASSIS_FRONT_LEFT_MOVE_ROTOR_TURNS 0.75f'
         $taskCaseConf = $taskCaseConf -replace '(?m)^#define CHASSIS_FRONT_RIGHT_MOVE_ROTOR_TURNS .*', '#define CHASSIS_FRONT_RIGHT_MOVE_ROTOR_TURNS -1.25f'
         [IO.File]::WriteAllText((Join-Path $taskDir 'Chassis_Conf.h'), $taskCaseConf)
         $taskArgs = @('-std=c99','-Wall','-Wextra','-Werror','-Wconversion','-Wshadow','-Wstrict-prototypes','-pedantic',('-I'+$taskDir))
+        if ($Optimize) { $taskArgs += '-O2' }
         foreach ($taskInclude in @('Task/Inc','APP/Inc','Chassis/Inc','Device/Inc','algorithm/Inc')) {
             $taskArgs += '-I' + (Join-Path $taskRoot $taskInclude)
         }

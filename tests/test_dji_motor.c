@@ -12,6 +12,7 @@ static uint32_t tick = 100u;
 static unsigned int checks, failures, send_calls;
 static unsigned int kernel_tick_calls;
 static DjiMotor_t *refresh_on_tick;
+static unsigned int delayed_check_ticks, delayed_source_frames;
 static FDCAN_HandleTypeDef *sent_bus;
 static uint16_t sent_id;
 static uint8_t sent_data[8];
@@ -21,6 +22,17 @@ static HAL_StatusTypeDef send_result = HAL_OK;
 uint32_t osKernelGetTickCount(void) { kernel_tick_calls++; return tick; }
 uint32_t HAL_GetTick(void)
 {
+    if (delayed_check_ticks != 0u) {
+        unsigned int i, duration = delayed_check_ticks;
+        const uint8_t data[8] = {0u};
+        delayed_check_ticks = 0u;
+        /* Task was preempted after loading rx_tick. CAN keeps receiving meanwhile. */
+        for (i = 0u; i < duration; i++) {
+            tick++;
+            DjiMotor_OnCanFrame(&hfdcan3, 0x203u, data, 8u);
+            if (i < delayed_source_frames) { DjiMotor_OnCanFrame(&hfdcan3, 0x204u, data, 8u); }
+        }
+    }
     uint32_t sampled = tick;
     if (refresh_on_tick != NULL) {
         /* CAN ISR arrives after HAL sampled now but before the caller resumes. */
@@ -160,7 +172,7 @@ static void test_protocol(void)
     expect_packet(&hfdcan2, 1u, 0x1FFu, 0, 0, 0, -10000);
     expect_packet(&hfdcan2, 2u, 0x2FFu, 0, 0, 30000, 0);
     expect_packet(&hfdcan3, 1u, 0x1FFu, 0, 0, 0, 42);
-    tick += 51u;
+    tick += 201u;
     expect_packet(&hfdcan1, 1u, 0x1FFu, 0, 0, 0, 0);
     expect_packet(&hfdcan2, 2u, 0x2FFu, 0, 0, 0, 0);
     send_result = HAL_BUSY;
@@ -335,9 +347,108 @@ static void test_startup_feedback(void)
     CHECK(kernel_tick_calls == 0u); /* Main enables CAN before RTOS startup. */
 }
 
+static void test_feedback_gaps(void)
+{
+    const uint8_t invalid_data[8] = {0u};
+    memset(&motors[0], 0xa5, sizeof(motors[0]));
+    CHECK(DjiMotor_Register(&motors[0], &hfdcan3, 4u, &DJI_MODEL_2006) == &motors[0]);
+    CHECK(DjiMotor_Register(&motors[1], &hfdcan3, 3u, &DJI_MODEL_2006) == &motors[1]);
+    CHECK(motors[0].rx_max_gap_ms == 0u && motors[0].rx_long_gap_count == 0u);
+    CHECK(motors[0].rx_last_long_gap_ms == 0u && motors[0].rx_resume_tick == 0u);
+    tick = 1000u;
+    feedback(&hfdcan3, 0x204u);
+    CHECK(motors[0].rx_max_gap_ms == 0u && motors[0].rx_long_gap_count == 0u);
+    tick = 1001u;
+    feedback(&hfdcan3, 0x204u);
+    CHECK(motors[0].rx_max_gap_ms == 1u);
+    tick = 1051u;
+    feedback(&hfdcan3, 0x204u);
+    CHECK(motors[0].rx_max_gap_ms == 50u && motors[0].rx_long_gap_count == 0u);
+    tick = 1102u;
+    feedback(&hfdcan3, 0x204u);
+    CHECK(motors[0].rx_max_gap_ms == 51u && motors[0].rx_long_gap_count == 1u);
+    CHECK(motors[0].rx_last_long_gap_ms == 51u && motors[0].rx_resume_tick == 1102u);
+    tick = 1103u;
+    feedback(&hfdcan3, 0x204u);
+    CHECK(motors[0].rx_max_gap_ms == 51u && motors[0].rx_long_gap_count == 1u);
+    CHECK(motors[0].rx_last_long_gap_ms == 51u && motors[0].rx_resume_tick == 1102u);
+    tick = 1203u;
+    feedback(&hfdcan3, 0x203u);
+    CHECK(motors[1].rx_max_gap_ms == 0u && motors[1].rx_long_gap_count == 0u);
+    tick = 1204u;
+    feedback(&hfdcan3, 0x204u);
+    CHECK(motors[0].rx_max_gap_ms == 101u && motors[0].rx_long_gap_count == 2u);
+    CHECK(motors[0].rx_last_long_gap_ms == 101u && motors[0].rx_resume_tick == 1204u);
+    tick = 2000u;
+    DjiMotor_OnCanFrame(&hfdcan3, 0x204u, invalid_data, 6u);
+    feedback(&hfdcan3, 0x206u);
+    CHECK(motors[0].rx_count == 6u && motors[0].rx_long_gap_count == 2u);
+    CHECK(motors[1].rx_long_gap_count == 0u);
+    CHECK(DjiMotor_Register(&motors[2], &hfdcan1, 1u, &DJI_MODEL_3508) == &motors[2]);
+    tick = UINT32_MAX - 20u;
+    feedback(&hfdcan1, 0x201u);
+    tick = 30u;
+    feedback(&hfdcan1, 0x201u);
+    CHECK(motors[2].rx_max_gap_ms == 51u && motors[2].rx_long_gap_count == 1u);
+    CHECK(motors[2].rx_last_long_gap_ms == 51u && motors[2].rx_resume_tick == 30u);
+    CHECK(motors[2].rx_tick == 30u && motors[2].rx_count == 2u);
+}
+
+static void test_online_snapshot(const char *name)
+{
+    unsigned int stale = strcmp(name, "online_snapshot_stale") == 0 ? 1u : 0u;
+    DjiMotor_t *motor = &g_motor_2006_1;
+    DjiMotor_Init();
+    tick = strcmp(name, "online_snapshot_wrap") == 0 ? UINT32_MAX - 20u : 1000u;
+    feedback(&hfdcan3, 0x204u);
+    delayed_check_ticks = stale != 0u ? 210u : 60u;
+    delayed_source_frames = stale != 0u ? 5u : 60u;
+    CHECK((DjiMotor_IsOnline(motor) != 0) == (stale == 0u));
+    CHECK(motor->rx_max_gap_ms == 1u && motor->rx_long_gap_count == 0u);
+    if (stale != 0u) {
+        CHECK((uint32_t)(tick - motor->rx_tick) == 205u);
+        feedback(&hfdcan3, 0x204u);
+        CHECK(motor->rx_last_long_gap_ms == 205u && motor->rx_long_gap_count == 1u);
+    } else {
+        CHECK(motor->rx_tick == tick && motor->rx_count == 61u);
+    }
+    CHECK(DjiMotor_IsOnline(motor) != 0);
+}
+
+static void test_2006_timeout_window(void)
+{
+    DjiMotor_Init();
+    tick = 1000u;
+    feedback(&hfdcan3, 0x203u);
+    feedback(&hfdcan3, 0x204u);
+    feedback(&hfdcan3, 0x201u); /* 3508 retains its50ms threshold. */
+    feedback(&hfdcan1, 0x205u); /* GM6020 retains its50ms threshold. */
+    tick = 1050u;
+    CHECK(DjiMotor_IsOnline(&g_motor_3508_3) != 0 && DjiMotor_IsOnline(&g_motor_6020_1) != 0);
+    tick = 1051u;
+    CHECK(DjiMotor_IsOnline(&g_motor_3508_3) == 0 && DjiMotor_IsOnline(&g_motor_6020_1) == 0);
+    CHECK(DjiMotor_IsOnline(&g_motor_2006_1) != 0 && DjiMotor_IsOnline(&g_motor_2006_2) != 0);
+    tick = 1086u;
+    CHECK(DjiMotor_IsOnline(&g_motor_2006_1) != 0);
+    feedback(&hfdcan3, 0x203u); feedback(&hfdcan3, 0x204u);
+    tick = 1211u;
+    CHECK(DjiMotor_IsOnline(&g_motor_2006_1) != 0 && DjiMotor_IsOnline(&g_motor_2006_2) != 0);
+    feedback(&hfdcan3, 0x203u); feedback(&hfdcan3, 0x204u);
+    CHECK(g_motor_2006_1.rx_max_gap_ms == 125u && g_motor_2006_1.rx_long_gap_count == 2u);
+    CHECK(g_motor_2006_1.rx_last_long_gap_ms == 125u);
+    tick = 1411u;
+    CHECK(DjiMotor_IsOnline(&g_motor_2006_1) != 0 && DjiMotor_IsOnline(&g_motor_2006_2) != 0);
+    tick = 1412u;
+    CHECK(DjiMotor_IsOnline(&g_motor_2006_1) == 0 && DjiMotor_IsOnline(&g_motor_2006_2) == 0);
+    feedback(&hfdcan3, 0x204u);
+    CHECK(DjiMotor_IsOnline(&g_motor_2006_1) != 0);
+}
+
 int main(int argc, char **argv)
 {
-    if ((argc > 1) && (strcmp(argv[1], "protocol") == 0)) {
+    if ((argc > 1) && (strcmp(argv[1], "2006_timeout_window") == 0)) {
+        test_2006_timeout_window();
+    } else if ((argc > 1) && (strcmp(argv[1], "protocol") == 0)) {
         test_protocol();
     } else if ((argc > 1) && (strcmp(argv[1], "init") == 0)) {
         test_init();
@@ -347,6 +458,12 @@ int main(int argc, char **argv)
         test_app_binding();
     } else if ((argc > 1) && (strcmp(argv[1], "startup_feedback") == 0)) {
         test_startup_feedback();
+    } else if ((argc > 1) && (strcmp(argv[1], "feedback_gaps") == 0)) {
+        test_feedback_gaps();
+    } else if ((argc > 1) && ((strcmp(argv[1], "online_snapshot") == 0) ||
+                            (strcmp(argv[1], "online_snapshot_stale") == 0) ||
+                            (strcmp(argv[1], "online_snapshot_wrap") == 0))) {
+        test_online_snapshot(argv[1]);
     } else {
         test_capacity();
     }

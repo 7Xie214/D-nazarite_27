@@ -22,6 +22,8 @@ typedef struct {
     uint32_t last_ecr;
     uint32_t error_record_count;  /* 有效错误快照次数，不等同于坏帧数 */
     uint32_t last_error_tick_ms;  /* 最后有效错误快照的HAL时间 */
+    uint32_t rx_fifo0_lost_count; /* FIFO0丢帧中断次数，不等于丢失帧数 */
+    uint32_t last_rx_loss_tick_ms;
 } BSP_CAN_Diagnostics_t;
 
 extern volatile BSP_CAN_Diagnostics_t g_can_diagnostics[3];

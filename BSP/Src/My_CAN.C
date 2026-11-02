@@ -74,6 +74,7 @@ HAL_StatusTypeDef BSP_CAN_Init(FDCAN_HandleTypeDef *hfdcan,
     /* 3) 接收与错误中断：错误码在第一次中断中保存，避免被轮询读成 7。 */
     if (HAL_FDCAN_ActivateNotification(hfdcan,
                                        FDCAN_IT_RX_FIFO0_NEW_MESSAGE |
+                                       FDCAN_IT_RX_FIFO0_MESSAGE_LOST |
                                        FDCAN_IT_BUS_OFF |
                                        FDCAN_IT_ARB_PROTOCOL_ERROR |
                                        FDCAN_IT_DATA_PROTOCOL_ERROR,
@@ -130,24 +131,32 @@ HAL_StatusTypeDef BSP_CAN_Send(FDCAN_HandleTypeDef *hfdcan,
     return HAL_FDCAN_AddMessageToTxFifoQ(hfdcan, &tx, (uint8_t *)data);
 }
 
-/* HAL 的 FIFO0 接收中断回调 → 取出报文 → 转交给应用层 */
+/* HAL先清接收中断标志；每次回调必须取空FIFO，不能只取一帧。 */
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
     FDCAN_RxHeaderTypeDef rx;
     uint8_t data[8];
 
-    if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) == 0U) {
+    if ((RxFifo0ITs & (FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_RX_FIFO0_MESSAGE_LOST)) == 0U) {
         return;
     }
 
-    if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &rx, data) != HAL_OK) {
-        return;
+    if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_MESSAGE_LOST) != 0U) {
+        uint32_t index = (hfdcan->Instance == FDCAN1) ? 0u :
+                         ((hfdcan->Instance == FDCAN2) ? 1u : 2u);
+        g_can_diagnostics[index].rx_fifo0_lost_count++;
+        g_can_diagnostics[index].last_rx_loss_tick_ms = HAL_GetTick();
     }
 
-    BSP_CAN_OnReceive(hfdcan,
-                      (uint16_t)rx.Identifier,
-                      data,
-                      (uint8_t)rx.DataLength);
+    while (HAL_FDCAN_GetRxFifoFillLevel(hfdcan, FDCAN_RX_FIFO0) != 0U) {
+        if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &rx, data) != HAL_OK) {
+            return;
+        }
+        BSP_CAN_OnReceive(hfdcan,
+                          (uint16_t)rx.Identifier,
+                          data,
+                          (uint8_t)rx.DataLength);
+    }
 }
 
 /* 默认空实现。应用层在任意一个 .c 里重新实现同名函数即可覆盖 */

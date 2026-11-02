@@ -18,6 +18,10 @@
 #include "PositionLoop.h"
 #include "Traj.h"
 
+/* 第四级35%行程触发ID2的单次快速规划；不修改该轴其他动作的默认限幅。 */
+#define UPSTAIRS_ID2_LINK_V_MAX_RAD_S 20.0f
+#define UPSTAIRS_ID2_LINK_A_MAX_RAD_S2 150.0f
+
 typedef struct {
     Cascade_Cfg_t cascade;      /* 位置环 + 速度环参数 */
     float         traj_v_max;   /* 巡航速度上限（位置单位/秒），必须 > 0 */
@@ -33,6 +37,8 @@ typedef struct {
 } MotorPair_Cfg_t;
 
 extern const MotorPair_Cfg_t MOTORPAIR_CFG_2006;
+/* Front M3508 pair: shared output-rad trajectory and cross coupling. */
+extern const MotorPair_Cfg_t MOTORPAIR_CFG_CHASSIS_FRONT;
 
 /* Drive feedback/setpoint use m/s; steering uses rad and rad/s. */
 typedef struct {
@@ -51,7 +57,8 @@ typedef struct {
     Chassis_DrivePID_Cfg_t drive;
 } Chassis_PID_Cfg_t;
 
-/* Independent FL, FR, RL, RR parameters; tune each wheel separately. */
+/* FL/FR/RL/RR: first two .steer blocks control GM6020 mechanical-zero hold.
+ * Steering position rad, speed rad/s, speed-loop output raw voltage. */
 extern const Chassis_PID_Cfg_t CHASSIS_PID_CFG[4];
 /* Independent FL/FR drive-position cascades; output rad, rad/s, rad/s^2. */
 extern const Axis_Cfg_t CHASSIS_FRONT_MOVE_CFG[2];

@@ -1,4 +1,4 @@
-param([string]$Compiler = 'gcc')
+param([string]$Compiler = 'gcc', [string]$Optimization = '-O0')
 
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
@@ -22,7 +22,7 @@ extern FDCAN_HandleTypeDef hfdcan1, hfdcan2, hfdcan3;
     [IO.File]::WriteAllText((Join-Path $taskBuildDir 'FreeRTOS.h'), "#define configTICK_RATE_HZ 1000u`n")
     [IO.File]::WriteAllText((Join-Path $taskBuildDir 'cmsis_os2.h'), "#include <stdint.h>`nuint32_t osKernelGetTickCount(void);`n")
     $taskExe = Join-Path $taskBuildDir 'test_dji_motor.exe'
-    & $Compiler -std=c99 -Wall -Wextra -Werror -Wconversion -Wshadow -Wstrict-prototypes -pedantic `
+    & $Compiler $Optimization -std=c99 -Wall -Wextra -Werror -Wconversion -Wshadow -Wstrict-prototypes -pedantic `
         ('-I' + $taskBuildDir) `
         ('-I' + (Join-Path $taskRoot 'Device/Inc')) `
         ('-I' + (Join-Path $taskRoot 'Test/Inc')) `
@@ -37,7 +37,7 @@ extern FDCAN_HandleTypeDef hfdcan1, hfdcan2, hfdcan3;
         (Join-Path $taskRoot 'algorithm/Src/PositionLoop.c') `
         (Join-Path $taskRoot 'algorithm/Src/Traj.c') -o $taskExe
     if ($LASTEXITCODE -ne 0) { throw 'DJI test compilation failed.' }
-    foreach ($taskCase in @('capacity', 'protocol', 'init', 'gm_slots', 'startup_feedback', 'app_binding')) {
+    foreach ($taskCase in @('2006_timeout_window', 'online_snapshot', 'online_snapshot_stale', 'online_snapshot_wrap', 'capacity', 'protocol', 'init', 'gm_slots', 'startup_feedback', 'app_binding', 'feedback_gaps')) {
         & $taskExe $taskCase
         if ($LASTEXITCODE -ne 0) { throw ('DJI tests failed: ' + $taskCase) }
     }

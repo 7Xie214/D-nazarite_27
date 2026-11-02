@@ -441,3 +441,501 @@
   pair/extra/lift faults, pending extra leg and no restart after completion.
   Existing task fixture stops at second step1 boundary; full O0/O2 suites pass.
   No flashing or physical second-stair verification by the agent.
+- Second-stair wait diagnostics (2026-10-30): second_stair.step1_axis[3]
+  records ID5/ID2/ID1 waiting in the lift step. Uses the existing first-stair
+  step2 gate classifier, with separate buffers/start clocks; each axis freezes
+  at first IDLE. last_reason: 1planner/2position/3speed/4settle/5fault;
+  done_ms=0 means not yet complete. Actual second-stair entry still requires
+  all three upper axes IDLE, including ID2 holding. pair_request_count[0/1]
+  and pair_move_result[0/1] distinguish unrequested legs from rejected/accepted
+  second-stair 2006 commands; result starts at1, OK0, errors follow MotorApp.
+  No changes to travel, PID, completion gates or motor control. O0/O2 tests
+  cover lift planner/position/speed blocking and persistent NOFB requests,
+  alongside prior full motion/task cases. ARMCC5 build/link0errors0warnings.
+  User's reported stop is not yet diagnosed on hardware; need current Watch
+  state/step, second_stair records and live axes/pair status for accepted moves.
+- Second-stair fourth step (2026-10-30): after its extra2006 pair+42 rotor
+  turns reports DONE, enter explicit group3/Watch step4 and command CAN3 ID2
+  M3508 (APP axis1) -35 rotor turns from its own current position. No repeated
+  accepted request. Use existing transient retry and PARAM/FAULT handling;
+  wait for this axis IDLE before setting second_stair.status2 and entering
+  third_stairs. The third step now freezes its duration and starts step4,
+  rather than declaring stair completion. Added second_stair.step4_start_ms,
+  step4_ms and id2_move_result (initial1, OK0); total_ms includes all four
+  steps. Existing first-stair actions and PID/planner parameters preserved.
+  O0/O2 full motion/task tests pass, including ID2 busy retry, pending arrival,
+  request/active faults, direction/binding, no repeat, timing and HAL wrap.
+  Keil ARMCC5 build/link0errors0warnings. No flashing or board verification.
+- Second-stair fifth step (2026-10-30): latest user edit sets step4 ID2
+  travel to -22.8 rotor turns; preserve it. ID2 IDLE now freezes step4 timing
+  and advances to explicit group4/Watch step5, commanding CAN3 ID1 M3508
+  (APP axis2) +35 rotor turns from its current actual origin. Only ID1 IDLE
+  completes second_stair/status2 and enters the reserved third_stairs state.
+  Existing accepted-once, transient retry and PARAM/FAULT patterns retained.
+  Added step5_start_ms, step5_ms, id1_move_result (initial1/OK0) to second_stair;
+  total_ms includes all five steps. Watch axis[2] for this ID1 motion. O0/O2
+  regression cases cover ID1 busy/pending/request-fault/active-fault, correct
+  order and sign, no repeat, five-step timing and HAL wrap. Original motion/
+  task cases pass; ARMCC5 build/link0errors0warnings. No flashing or board run.
+- First-stair wait-for-lift handoff (2026-10-30): supersedes the old
+  request-accepted-only handoff for the selected ACTIVE first-stair group2.
+  Require pair DONE and accepted ID5 request plus axis0 IDLE before group3;
+  zero pair travel retains its no-lift exception. ID5 faults stop progression.
+  User now configures 60% trigger, ID5 -36.5 rotor turns and extra pair45;
+  preserve these. User has commented out the whole second_stairs case; do
+  not re-enable it. A void-use keeps its reserved clock warning-free without
+  changing the commented code. Existing Watch axis[0].state shows lift
+  readiness; step3_after_pair_ms now includes lift-arrival waiting. New
+  standalone first-stair handoff script runs7 cases at O0/O2 (14passed),
+  covering either completion order, MOVING despite position arrival, stall,
+  fault, fallback, retry and clock wrap. Old full-stair fixtures still assume
+  enabled second-stair actions and old no-wait behavior; they are not a pass
+  claim for this current user-disabled configuration. Keil ARMCC5 build/link
+  0errors0warnings. No flashing or physical verification by the agent.
+- ID2-to-ID1 current-arrival gate (2026-10-30): user has RE-ENABLED the
+  second_stairs case. Latest second targets: +36/0/-36, ID5-36, pair extra45,
+  ID2-22.8, ID1+36 rotor turns; preserve these user edits. Original group3
+  checked only latched AXIS_IDLE. Real MotorApp tests confirm an IDLE axis
+  remains IDLE after0.5rotor-turn drift/30rpm and outputs holding correction;
+  task regressions reproduced premature ID1 acceptance for stale-IDLE inputs.
+  This is a proven software edge case, not a confirmed board root cause.
+  Group3 now saves its original accepted ID2 target privately and requires
+  IDLE plus inactive planner, current original-goal error<=0.1rotor turns and
+  speed<=10rotor rpm before group4. Existing tolerances/PIDs are unchanged.
+  New second_stair.id2_actual_turns/id2_error_turns/id2_speed_rpm update in
+  group3 and freeze at handoff; id2_handoff_done1 and step5_start_ms identify
+  that snapshot. Debug writes do not affect the private target/controller.
+  Distinguish actual stage5 command (step5/id1_move_result0) from ID1 holding
+  motion while still step4/result1; user was asked for these board values.
+  Native upper/pair/23second-task cases pass O0/O2 with TaskCases=wait, plus
+  standalone first-handoff14runs; old first full-task fixture is not claimed
+  passing because it retains obsolete targets/handoff expectations. Keil
+  ARMCC5 build/link0errors0warnings. No flash or board-run verification.
+- FIFO0 drain fix (2026-10-30): latest user snapshot confirms pairFAULT3 /
+  faultOFFLINE1 / sourceID4 at HAL9391ms, ID3 rx age1ms vs ID4 age51ms.
+  Pre-fault raw commands ID3-2787/ID4+5256; leg duration5702ms. This proves
+  an ID4 timestamp gap, not a damaged motor or a proven physical cause.
+  Found original BSP HAL_FDCAN_RxFifo0Callback consumed only one queued frame
+  although local HAL clears RF0N before callback. Now drain FIFO0 to empty on
+  NEW_MESSAGE or MESSAGE_LOST, return on read failure, avoid empty reads.
+  Enable lost-message notification and add per-bus rx_fifo0_lost_count and
+  last_rx_loss_tick_ms; the count is IRQ observations, not exact lost frames.
+  Existing CAN3 FIFO8, 50ms offline threshold, protocol history, Bus-Off
+  recovery, pins/timing, stage targets and PIDs retained. Native real-BSP
+  queue regression reproduced24pre-fix failures across3buses; O0/O2 now pass
+  queued bursts, lost/mixed events, empty FIFO, unrelated flags and read error
+  exit, alongside previous recovery tests. 672DJI checks pass; ARMCC5 build/
+  link0errors0warnings. No flash or board run; the software queue defect is
+  fixed but whether it caused this51ms gap requires fresh board evidence.
+  Compare CAN3 diag[2] loss/error event times with new pair fault timestamps.
+- Full feedback-gap observation (2026-10-30): user reports BOTH2006 live
+  rx_count values keep increasing after fault; CAN3 loss/error diagnostics0.
+  This establishes resumed feedback, while the group/task fault stays latched;
+  the triggering age51ms does NOT give the full interruption duration. Added
+  per-DjiMotor pure diagnostics rx_max_gap_ms, rx_long_gap_count,
+  rx_last_long_gap_ms and rx_resume_tick. First frame is excluded; valid
+  recovery frames close the interval and increment count only if>50ms;
+  later normal frames preserve the last long-gap record. Times are Device
+  dispatch HAL timestamps, not direct wire timestamps. Registration clears
+  all4fields. No change to offline threshold, fault latch, motor commands or
+  stair actions. Watch ID4 g_motor_2006_1 vs ID3 g_motor_2006_2 after leaving
+  program running through feedback recovery; correlate resume/fault times.
+  692checks pass at O0 and O2 (original672 +20gap checks), including 50/51ms,
+  retained history, first-frame ignore, independent nodes, invalid frames and
+  uint32wrap. Keil ARMCC5 build/link0errors0warnings. No flashing or board run;
+  underlying source of the short feedback outage remains unconfirmed.
+- Online-snapshot preemption race (2026-10-30): new screenshots show ID4
+  maxgap2ms/longgapcount0 and active command3887, but do not simultaneously
+  show pair state/fault. Asked whether same faulted boot and for same-time
+  group values; do not assert the pictures prove that earlier board fault
+  was false or that these were true51ms wire outages. Earlier timestamp-gap
+  interpretation was too strong: IsOnline loaded rx_tick before reading now;
+  task preemption60ms with perfectly continuous1ms CAN updates caused old
+  snapshot to return OFFLINE although actual maxgap1ms. Reproduced before
+  fixing. Now read rx_tick/now and retry if rx_tick changed during sampling;
+  avoids stale-age and prior unsigned-underflow races without IRQ masking or
+  threshold change. Pair-fault age snapshot uses the same consistent read.
+  Genuine source stop55ms still fails, continuous updates through uint32wrap
+  pass. Each O0/O2 runs705DJI checks; upper/pair/23second cases with TaskCases
+  wait and first-handoff14runs pass. User now sets ID2 step4=-23.8 (not-22.8);
+  preserved, fixture expected value updated. ARMCC5 build/link0errors0warnings.
+  No flash/board run. Re-download/reset for testing; do not label this proven
+  resolution of the user's physical symptom before fresh board evidence.
+- Fresh post-fix board evidence (2026-10-30): user explicitly labels new run.
+  ID4 maxgap86ms/4long gaps/last61ms/resume13382ms; ID3 maxgap125ms/
+  1long gap/resume22948ms. Both commands0. PairFAULT3/OFFLINE1/source4
+  at12209ms; fault age ID3=0ms, ID4=51ms. CAN3 firstLEC1Stuff, lastLEC2Form,
+  error snapshots6 (not exact bad-frame count), busoff0, FIFO-loss0. Last
+  protocol error22961ms is13ms after ID3 recovery but10752ms AFTER first
+  pair fault; do not claim it directly caused that earlier event. ID4's last
+  recovery is1173ms after fault, so not necessarily the triggering interval.
+  Actual Device dispatch gaps now established, beyond prior false-online
+  race; wire/node versus MCU receipt root cause still unconfirmed. Current
+  FIRST extra travel is user-edited42rotor turns (not45), preserved. Pair
+  FAULT branch prevents DONE transition to second stair. No new runtime
+  changes made for this analysis. Next discriminating evidence is CAN3
+  0x203/0x204 traffic/waveform and node ID uniqueness/power/link conditions;
+  do not enlarge FIFO or relax threshold as an established root-cause fix.
+- Authorized timeout trial (2026-10-31): user explicitly asks to increase
+  the time because feedback later resumes. ONLY canonical DJI_MODEL_2006
+  online threshold is now200ms (DJI_MOTOR_2006_TIMEOUT_MS in DjiMotor.c);
+  3508/GM6020 retain50ms via DJI_MOTOR_TIMEOUT_MS. Keep long-gap diagnostics
+  counting>50ms, so86/125ms gaps remain observable despite the trial. At
+  exactly200ms online,201ms offline; no-feedback startup still offline and
+  fault latch still requires reset. No root-cause or hardware fix claimed.
+  User has AGAIN commented out entire second_stairs; preserve this. Local
+  reserved second_id2_target_rad is now unused, so full native task compile
+  with-Werror fails in that user-disabled configuration. Added MotionOnly
+  test selection for upper/pair suites without changing task code. Each O0/O2
+  passes715DJI checks and upper/pair motion including two125ms gap-recovery
+  cases and201ms true-fault zero/latch cases. No changes to PID/travel/FIFO.
+  Test strategy documents that stale feedback continues being used within
+  the widened window. New board test still required; no flashing performed.
+  Latest header-triggered Keil compile/link:0errors/1warning (#177 unused
+  second_id2_target_rad from user-commented second case). Task source left
+  untouched; this is not an error in the timeout trial. Fresh binary produced.
+- Front steering zero hold (2026-10-31): user explicitly chooses ChassisApp /
+  ChassisTask ownership, separate from upstairs_task, for FL CAN1 GM6020 ID1
+  and FR CAN2 GM6020 ID4. ChassisTask runs calibrated mechanical zero hold
+  immediately at nominal 1ms, before/independent of g_upstairs_start. New
+  CHASSIS_TASK_FRONT_MOVE_ENABLE defaults0 (hold only);1 retains legacy front
+  drive/notification mode. Hold-only move requests return osErrorResource.
+  ChassisApp_UpdateFrontSteerHold uses existing g_chassis_wheels[0/1].steer_pid
+  and g_swerve_modules[0/1], sharing extracted absolute-angle readback with the
+  old APP flow. No geometry or other six motors' feedback needed. Per-axis
+  offline/invalid range clears output and resets control, while healthy side
+  continues; recovery targets calibrated zero rather than startup heading.
+  CAN1/2 transmit only0x1ff; unused rear-steer slots stay0. Upper CAN3/task,
+  travel, pins, 2006 trial timeout and kinematics untouched. FL/FR .steer in
+  CHASSIS_PID_CFG now trial posKp6, speedKp1500, speed cap1rad/s, I/D0,
+  voltage cap30000. These are initial P/P trial values, not measured tuning.
+  FL/FR ZERO_OFFSET still0 and must be filled with actual calibration counts.
+  New real-task/APP/Device/PID regression failed14checks before implementation,
+  then379checks each O0/O2 pass, covering two-node-only startup, absolute wrap,
+  reversed installation, zero hold, disturbance, loss/recovery, bounds, packets,
+  voltage clipping and invaliddt. Legacy APP467+reserved6 checks each O0/O2
+  pass; task hold65/legacy84/notifications454/reserved4 pass. Upper/pair motion
+  O0/O2 regressions pass. Keil ARMCC5 compile/link0errors0warnings; fresh HEX
+  produced. No board run, flashing or physical holding claim.
+- Front steer tuning follow-up (2026-10-31): user changes FL/FR position speed
+  caps to25rad/s (not rpm). At posKp6, a90deg error requests9.425rad/s, so
+  cap25 is inactive throughout the default +/-90deg return-to-zero range.
+  Authorized FL/FR speed-loop voltage command caps now24000 (80% of protocol
+  range30000); Device model cap remains30000. All gains retained. Ideal
+  perfect-velocity-following model gives95% error decay0.499s,98%0.652s and
+  90deg->1deg0.750s; these are conditional estimates, not board timings.
+  Front hold regression380checks each O0/O2 pass, including24000 braking cap
+  and separate30000 protocol clamp. Fresh Keil0errors0warnings. No flashing.
+- Third stair front-drive pair (2026-10-31): user requests FL CAN1 M3508 ID1
+  +12.2969213 and FR CAN2 M3508 ID4 -12.2969213 PRE-reduction rotor turns.
+  User explicitly confirms ANY-side completion like current2006: either
+  original goal error<=0.1rotor turns ends leg, both rebase actual positions,
+  clear prior controller state/cross coupling, latchDONE while independently
+  holding. No planner/speed/settle/timeout gate. ChassisApp adds distinct
+  UpdateFrontPair/MoveFrontPairTurns; legacy independent FrontMove APIs remain.
+  Raw motor signs are independent of swerve encoder-direction coordinates;
+  staged endpoints divide by ratio once and are validated before either start.
+  One common positive-output-rad Traj, per-wheel cascades, normalized bounded
+  cross coupling and final speed slew. Motion reference cannot reverse solely
+  from coupling. Only four front nodes needed, no rear feedback/geometry.
+  Front GM6020 zero hold continues independently; rear old commands cleared
+  before0x1ff/0x200 submission. Active or DONE-hold front feedback loss zeros
+  drives and latchesFAULT; healthy steering continues. Pair fault status and
+  sourceID remain visible after feedback recovery; no automatic restart.
+  CHASSIS_TASK_FRONT_MOVE_ENABLE now1. Task still1ms with actualdt; START/DONE/
+  ERROR handshake retained but uses new pair APIs. Third_stairs explicitgroup0
+  sends request once after second completes, retries rejected flag publication,
+  waits reply, errors latch taskfault; success group1/debugstep2 is reserved.
+  g_upstairs_debug.third_stair exposes status/request/reply/timing;
+  g_chassis_front_pair exposes signed actual/error rotor turns, normalized
+  sync error, common reference, signed rpm commands, planner and finish/faultID.
+  Config travel/tolerance in Chassis_Conf; CHASSIS_FRONT_MOVE_CFG[2].cascade
+  trial posP18, speedPI1467.0171/2200.5256, Icommandcap4000, speedcap12rad/s;
+  MOTORPAIR_CFG_CHASSIS_FRONT v6/a12/syncP2/syncmax1/commandA60. Per-axis
+  trajv/a stay0 (only old independent API uses them); new pair uses groupcfg.
+  User current calibration FL4628/FR5657/RL1495/RR6690, front steer gains
+  pos16/2 and speed3000/100, voltage24000 and Device6020cap25000 preserved.
+  First extra2006 travel now38.5; second lift+/-36.5, ID5-36.5, extra40,
+  ID2-24.2, ID1+36.5; no preceding stair motion values changed by this feature.
+  Main RTOS flag0 and user's inactive raw encoder-calibration branch preserved.
+  New real upstairs third-step fixture failed3assertions before implementation,
+  flow/retry/rejection/error cases passO0/O2 after. Pair tests4737checks each
+  default/reversed direction atO0/O2 (18948total), covering genuine wrapped CAN
+  feedback, atomic/preflight, signs, shared refs/slew/sync, either-side rebase,
+  no120s/reference-only false completion, dropout/status retention, stale rear
+  slots, bounds and numeric staging. Legacy APP467+reserved6 checks eachO0/O2,
+  hold380eachO0/O2, task65/84/notifications454/reserved4, first-handoff14runs,
+  upper9/pair26/second-task23 and firstwait atO0/O2 pass. Legacy fixtures use
+  synthetic zero offsets/local P gains so user measured calibration/PI tuning
+  isn't overwritten. Full old first-stair task case selection still contains
+  obsolete configuration expectations; use isolated handoff/newthird plus
+  run_upstairs_tests -TaskCases wait for current supported regression set.
+  Two-stage read-only review findings (finite endpoint staging and fault status)
+  resolved and rechecked. Fresh ARMCC5 Keil compile/link0errors0warnings.
+  No flash, board run or physical tuning; trial values do not promise arrival.
+- First-stair-only selection (2026-10-31): user explicitly requests commenting
+  out both later stairs. Task/Src/My_task.c wraps complete second_stairs and
+  third_stairs case blocks in #if0, preserving all source inside. First-stair
+  actions/targets/conditions unchanged; its existing transition reaches now-
+  disabled second state and default branch keeps updating/holding without new
+  later-stage commands. Void-use preserves reserved ID2 target variable without
+  unused warnings. ChassisTask startup front drive/steer holding remains active;
+  no change to motor ownership, PID, CAN or notifications. Do not re-enable later
+  stairs to satisfy full-stage tests. Existing first handoff7cases passO0/O2;
+  fresh Keil ARMCC5 compile/link0errors0warnings. No flashing performed.
+- Fix premature front3508 holding (2026-10-31): user reports chassis wheels
+  resist climbing and clarifies only front6020 should control before third-
+  stair request. Root defect: UpdateFrontPair used Cascade_Update in initial
+  CHASSIS_FRONT_HOLD as well as DONE, braking externally rolled wheels before
+  permission. New real-feedback regression produced100failing assertions on
+  old code. Initial HOLD now bypasses BOTH drive PIDs, forces both3508 cmd0,
+  speed-command metadata0, and still updates encoder feedback/readiness.
+  Successful MoveFrontPairTurns alone starts drive control from latest actual
+  origins; latched DONE still holds after an accepted move. Front6020 zero
+  control, drive gains/targets, upper axes and stair steps unchanged. Both
+  later stairs remain #if0, so this first-only selection never arms chassis
+  driving. Keep mode1 notification capability; do not restore startup drive
+  holding. Pair suite5002checks each default/reversed atO0/O2 (20008total)
+  passes, including external wheel travel/300,-400rpm producing zero CAN
+  current before request, no integral accumulation, steer control still active,
+  rejected requests not arming, and fresh-start relative12.2969213rotor targets.
+  First handoff14runs, task65/84+notifications454+reserved4, steer hold380each
+  O0/O2 also pass. Fresh ARMCC5 compile/link0errors0warnings. No flashing or
+  board verification; user must download fresh firmware to test this correction.
+- Re-enable later stairs (2026-10-31): user now explicitly asks to remove the
+  temporary comment. Removed only #if0/#endif around second_stairs/third_stairs
+  and restored default-branch explanatory comment. All travel/PID/calibration
+  and first-stair actions unchanged. Crucial prior fix retained: front3508
+  commands remain0 and both drive PIDs inactive until accepted third-stair
+  request; front6020 zero hold starts at power-on. Second/third task fixtures,
+  upper/pair motion and selected firstwait passO0/O2. Fresh Keil ARMCC5 build/
+  link0errors0warnings; no flashing performed.
+- Third-stair lift and2006 follow-up (2026-10-31): after chassis DONE,
+  explicit third group1/Watchstep2 calls existing upper3508 sync API once with
+  ID5/ID2/ID1 rotor-turn array +36.5/0/-36.5; ID2 no added travel. Requests
+  BUSY/NOFB retry without partial starts; PARAM/FAULT locks task fault. Wait
+  only active ID5/ID1: IDLE plus current target error/speed within existing
+  tolerances and planner inactive, avoiding stale-IDLE handoff after drift.
+  Then group2/Watchstep3 calls Move2006Pair(+50.19518086rotor turns) once;
+  existing any-side arrival applies. No75%/other ID5 action in this leg. DONE
+  enters group3/Watchstep4 reserved, keeps holding. First/second stair cases,
+  all gains/calibration and front-drive no-PID-before-request fix untouched.
+  Third debug adds step2/3 timestamps/durations,total,lift/pair results;status2
+  now means implemented3-step sequence complete, not merely chassis step done.
+  Async task fixture first failed4checks before implementation,13cases each
+  O0/O2 pass including staggered/wait either3508, stale-IDLE actual drift,
+  lift/pair request retries/rejections/faults, pair waiting, no repeats and
+  timing sum/freeze. First handoff14runs and upper/pair/second23 regressions
+  pass. Fresh Keil ARMCC5 compile/link0errors0warnings. No board run or flash.
+- Third stair final ID1 step (2026-10-31): user says existing motion now works
+  and asks one last action. After third group2 dual2006 DONE, group3/Watchstep4
+  commands CAN3 ID1 upper3508 (APPaxis2) +36.5 rotor turns relative to actual
+  position via MoveTurns. Accepted once, transient request retry, permanent or
+  active fault stops sequence. Only ID1 IDLE now marks third.status2 and
+  enters group4/Watchstep5 holding;2006 DONE alone no longer marks completion.
+  Third debug adds step4_start_ms/step4_ms/id1_move_result, total includes all4.
+  No prior stage motion/PID/Chassis/Device changes. New absence test failed2
+  checks first; expanded17task cases passO0/O2 including final retry, rejection,
+  active fault, pending actual arrival, no repeats and four-step timing sum.
+  First handoff14runs, upper/pair and second23 casesO0/O2 also pass. Fresh
+  ARMCC5 Keil compile/link0errors0warnings. No flash or board testing by agent.
+- Parallel third-stair final lift (2026-10-31): user adds CAN3 ID5 -36.5
+  rotor turns to the end, then immediately specifies it can run simultaneously
+  with final CAN3 ID1 +36.5. Supersedes ID1-only final step; no serial fifth
+  production step installed. Thirdgroup3/Watchstep4 now calls existing
+  Move3508TurnsSync once with ID5/ID2/ID1=-36.5/0/+36.5, same shared progress
+  rate/accel, ID2 no added travel. Wait BOTH axes0/2 IDLE, inactive planner,
+  live endpoint error and speed within existing tolerances. Old latched IDLE
+  cannot finish if an axis has drifted. Any relevant axis fault stops flow.
+  Only both arrived set third.status2/group4/Watchstep5 holding. Existing
+  id1_move_result now records group acceptance and new id5_move_result records
+  the same result; fourth-step timing covers concurrent moves. Earlier stages,
+  other third steps, PID and chassis startup drive-current gate unchanged.
+  Aborted-turn serial test edits replaced by final-sync expectations. Old
+  ID1-only code failed4checks;20async task cases passO0/O2, including atomic
+  final request/directions, either-side waiting/fault, stale-IDLE position,
+  retry/rejection, no repeats and four-step timing. First handoff14runs,
+  upper/pair motion and second23cases passO0/O2. No flashing or board run.
+- Fourth stair step1 (2026-10-31): after third final BOTH upper3508 arrivals,
+  enter fourth_stairs (enum4, fault remains3). Explicit group0 requests front
+  CAN1 ID1 +13.8070695 and CAN2 ID4 -13.8070695 PRE-reduction rotor turns.
+  Reuses existing shared front-pair planner/controllers/any-side completion,
+  then holds at fourth group1/Watchstep2 reserved. Third defaults remain
+  +/-12.2969213; earlier stair targets/PIDs and startup drive-zero gate retained.
+  RequestFrontMoveTurns publishes travel+START under scheduler lock, rejects
+  busy without overwrite, preserves private travel through readiness retries,
+  releases reservation only after successful reply. Noarg API keeps defaults.
+  fourth_stair debug records request/reply/status/step1 time.24flow scenarios
+  and65/84/674/4chassis checks passO0/O2, plus first handoff/upper/pair/second
+  regressions. Fresh Keil ARMCC5 link0errors0warnings. No flash or board run.
+- Fourth stair steps2/3 (2026-10-31): after front pair DONE, group1 requests
+  upper CAN3 ID5/ID2/ID1=+36.5/0/-36.5 rotor turns in one shared3508 move.
+  BOTH requested axes0/2 must be IDLE with inactive planner, live endpoint
+  error and speed inside existing tolerances before group2 requests dual2006
+  +50.19518086 rotor turns. Existing pair any-sideDONE ends this implemented
+  sequence at group3/Watchstep4 reserved, fourth.status2. No lift trigger is
+  added during this pair move. Retries precede acceptance; never repeat accepted
+  moves; permanent/active faults stop flow. fourth debug adds lift/pair results,
+  step2/3 time and total, frozen on completion/fault. Preserve user fourth front
+  travel +/-15.2453059 and second ID2 -23.8 tuning (old test expectations updated).
+  SHA256 confirms earlier three case blocks and PID/Chassis configs unchanged.
+  New flow failed4checks first;34third/fourth scenariosO0/O2 and first handoff,
+  upper9/pair26/second23/wait regressionsO0/O2 pass. Fresh ARMCC5 Keil link
+  0errors0warnings. No flashing or physical fourth-stair verification.
+- Fourth stair step4 (2026-10-31): after group2 pair DONE, group3 first calls
+  MoveTurns(axis2/CAN3 ID1,+36.5 rotor turns). Wait for live IDLE+inactive
+  planner+endpoint position/speed within existing limits; only then request
+  front FL+17.402660 / FR-17.4026606 rotor turns through the existing task pair
+  API. Keep both actions in Watchstep4: issued0 requestID1,1 waitID1,2 request
+  front,3 waitreply. Final frontDONE alone sets fourth.status2 and group4/
+  Watchstep5 reserved; group2 DONE no longer marks fourth complete. Retries
+  cannot repeat accepted moves; faults stop further requests. Added fourth
+  step4 duration, ID1 result and separate final-front request/reply fields.
+  No controller/PID/earlier stage motion changes. User second ID2 is now-24.0;
+  tests read that local constant instead of imposing the previous-23.8 value.
+  New absent-flow failed5checks,45async scenariosO0/O2 and first handoff/upper/
+  pair/second/wait regressions pass. Fresh Keil ARMCC5 link0errors0warnings.
+  No flashing or board verification performed.
+- Fourth stair temporary pause (2026-10-31): user asks to comment out its
+  last three steps. Only fourth_stairs cases1/2/3 are enclosed in #if0;
+  original code/targets remain intact. Fourth step1 stays active, then group1/
+  Watchstep2 enters default holding without new moves. Prior stair cases and
+  PID settings unchanged. The full-flow test expects disabled actions and is
+  not applicable while this temporary block remains disabled. No flashing.
+- Corrected temporary-disable scope (2026-10-31): user meant stair levels2/3/4,
+  not fourth-level steps2/3/4. Removed that inner disable and placed one outer
+  #if0 around entire second_stairs through fourth_stairs cases. First stair
+  actions remain active; its normal handoff reaches default holding with no
+  later-stage requests. All later code/targets retained. Full-flow tests that
+  require later stages are inapplicable while disabled. No flashing.
+- Restored full stair flow (2026-10-31): user asks to remove the disable.
+  Removed the outer #if0/#endif around levels2/3/4; all four implemented levels
+  are active again. Existing targets, PID settings and completion gates retained.
+  No flashing performed.
+- Four-steering zero hold (2026-10-31): user adds rear6020 holding. ChassisTask
+  mode0 now calls UpdateSteerHold for all4; front-pair mode also runs4steer
+  cascades. Rear RL CAN1ID2 / RR CAN2ID3 use existing ZERO_OFFSET/directions.
+  Rear steer gains copy front trial16/2,3000/100, speed25, voltage cap24000;
+  front/upper/drive gains and calibration macros retained. Shared private loop
+  returns front-only status for pair readiness/fault checks while steering-only
+  mode reports all4 aggregate. Rear faults stop only affected rear; no new front
+  travel dependencies. Old UpdateFrontSteerHold retains front-only API behavior.
+  Rear drive commands stay0, front drive gate before accepted request unchanged.
+  Both0x1ffframes now carry rear steer slots too, no extra traffic/CAN3 ownership.
+  New tests first failed5checks, then387holdchecksO0/O2 and5004pairchecks each
+  normal/reversed directionsO0/O2 pass;task65/84/674/4 bothopts pass. Fresh Keil
+  ARMCC5 link0errors0warnings. No flashing or physical rear tuning performed.
+- Fifth stair steps1/2 (2026-10-31): after fourth final frontDONE, record fourth
+  completion and enter fifth_stairs(enum5;fault remains3). Own group0 requests
+  front CAN1ID1 +15.2453059 / CAN2ID4 -15.2453059 PRE-reduction rotor turns,
+  using existing front-pair any-side completion; wait its DONE reply. Group1
+  then MoveTurns(APPaxis1, upper CAN3ID2,+7.6812 rotor turns). Wait liveIDLE,
+  inactive planner and endpoint/speed tolerances before fifth.status2/group2/
+  Watchstep3 reserved. Retries precede acceptance; no accepted move repeats;
+  errors/faults latch. New fifth debug results/reply/two-step/total timing freezes
+  on completion/fault. Earlier targets/PIDs/four-steer holds unchanged; fourth
+  only changes its next-stage transition. Six checks failed before implementation,
+  then56async scenariosO0/O2 plus first handoff/upper/pair/second/wait regressions
+  pass. Fresh Keil ARMCC5 link0errors0warnings. No flashing or physical test.
+- Fourth final simultaneous ID5/ID1 update (2026-10-31): user adds ID5-36.5
+  after fourth dual2006DONE, concurrently with existing ID1+36.5, then next
+  action. Replaced fourth group3 single MoveTurns with one Move3508TurnsSync
+  ID5/ID2/ID1=-36.5/0/+36.5, same progress limits. Both axes0/2 must be IDLE,
+  planner inactive and current endpoint/speed within tolerance before issued2
+  permits original front17.402660/-17.4026606 move. Either axis fault aborts;
+  accepted group never reissued. New fourth.id5_move_result matches shared
+  id1 result. Original bottom request/reply, fifth transition, other targets,
+  PID and four-steer holds unchanged. Former code failed5checks first;59async
+  scenariosO0/O2 pass including ID5 late/stale-IDLE/fault and prior ID1 gates,
+  plus first handoff/upper/pair/second/wait regressions. No flashing/board test.
+- Fourth35% ID2 linkage replaces duplicate fifth stair (2026-10-31): user had
+  commented fifthcase; removed its case/enum/debug/transition. Fourth final
+  FL+17.402660/FR-17.4026606 now triggers CAN3ID2+7.6812 raw rotor turns when
+  BOTH signed ACTUAL travels reach35%; latch/retry/acceptonce. APP move_sequence
+  distinguishes prior15.245 progress. Task publishes a complete pair+sequence
+  snapshot under scheduler lock after APP update/start and before reply; getter
+  reads under same lock. Mid-APP preemption test failed15checks with directreads,
+  then715notificationchecksO0/O2 pass. Early frontDONE supplements untriggered
+  ID2 to avoiddeadlock, with missed75 recorded. Latch consumedDONE; wait BOTH
+  frontDONE and current ID2 idle/inactive/liveendpoint/speed before fourthdone/
+  group4reserved. PID_Config.h per-action20rad/s,150rad/s2 applied only after
+  acceptedID2request, originals restored when reference inactive/faultstopped;
+  defaultAxis2 PID/30/30 and earlier targets unchanged. RealTraj1ms: front35=
+  582ms,75=962ms/window380ms, oldID2=609ms,new=281ms/margin99ms (reference only).
+  fourth debug front35/75/ID2trigger/done timestamps, normalizedactuals,
+  id2_before75 and deadline_missed expose actual result; no autopause/timeout.
+  57async scenariosO0/O2,5006frontpair eachdirection/opt,387steer,task65/84/715/4
+  and upper/pair/second/wait/firsthandoff suites pass. No flashing/physical test.
+- Fourth final40%-wait scheme (2026-10-31): user explicitly replaces timing-only
+  method and cancels further rootcause investigation. Keep BOTH actual35%
+  triggerID2+7.6812, but request frontWithPause(...,0.4). APP preplans braking
+  to40%, retains original full endpoints/origins/sequence, holds position and
+  suppresses DONE while armed. paused requires common reference inactive, BOTH
+  actual stop errors within existing tolerance and BOTHspeeds<=0.05outputrad/s;
+  disturbance clearspaused. Upstairs captures original ID2goal, validates live
+  arrival against it, then posts matchingsequence RESUME once/retry. Task API
+  accepts resume only when coherent publishedpaused; owner recheckspaused and
+  continues SAME trajectory40->100. No newfull relativeleg, no fifthstage, no
+  defaultPID/travel changes. APP paused/pause_ms/resume_ms and fourthresume
+  result/originalID2error expose status. Old75% timing is observational only.
+  58async casesO0/O2 pass inclhold40, retargeted-halfgoalnotaccepted,resumeretry;
+  5032APPchecks eachdirection/O0/O2 incl1600cyclehold, armednoDONE, originalend,
+  negative travel/disturbance/dropout;Task65/84/789/4,387steer and upper/pair/
+  second/wait/handoff regressionspass. Fresh ARMCC5 link0errors0warnings.
+  No flashing or physical verification performed.
+- Fourth final ID2 travel update (2026-10-31): requested CAN3ID2 move is now
+  +31.6812 rotor turns instead of+7.6812. Earlier ID2 travels-7.6812/-24 give
+  configured net0 (absolute63.3624). Retain35% trigger,40% stop/wait/resume,
+  captured actual endpoint checks and existing PID/limits. CAN3ID1 configured
+  stage1=-34.430979-36.5; stages2/3/4 each-36.5+36.5, hence net-70.930979
+  and absolute289.930979 rotor turns. Updated existing async request assertion
+  failed once with old target, then58casesO0/O2 and upper/pair regressions
+  passed. RealTraj new ID2 reference674ms with current per-action limits,
+  not physical arrival time. No flashing or board verification performed.
+- Final upper ID1 return (2026-10-31): fourth group4/Watchstep5 now requests
+  CAN3 ID1(axis2)+70.930979 rotor turns, only after final frontDONE AND live
+  ID2arrival. Actual start is captured by MoveTurns; save original target for
+  live arrival (IDLE/inactive planner/position0.1rotor/speed10rpm). Acceptonce,
+  transient requests retry, faults latch. Fourth.status2 now occurs AFTER this
+  move, group5/Watchstep6 is reserved holding. New fourth step5_start_ms/ms,
+  id1_return_move_result/error_turns expose timing/result/original-goal error;
+  total includes the new step. No PID/controller changes. Preserve user's
+  current final front+19.402660/-19.4026606, ID2+31.6812 and40%-wait flow.
+  ID1 configured net becomes0 after this relative return. Test fake now derives
+  signed final front targets from accepted request, preserving user tuning.
+  Missing-step regression failed4checks, then66async cases eachO0/O2 pass,
+  including returnretry/reject/wait/stale/speed/planner/fault/goalreset;72upper/
+  pair runs also pass. Fresh ARMCC5 link0errors0warnings. No flash/board test.
+- First-stair-only and RR release (2026-11-01): user requests disabling stair2
+  onward AND releasing right-rear position hold. One outer#if0 wraps entire
+  second/third/fourth cases; related fourth-only locals also#if0 to keep compile
+  clean. All retained targets/parameters/ID1final return remain in source.
+  First stair and its completion flag are unchanged; normal handoff selects
+  disabled second case and falls into default holding, without later moves.
+  Full later-stage async tests are inapplicable until the block is restored.
+  Current ChassisTask steer-only and paired-front paths use zero-hold count3
+  (FL/FR/RL), so RR GM6020 CAN2ID3 skips cascade and helper forces its command
+  and CAN voltage slot0 each cycle. Other3 holds/calibration/PIDs retained;
+  rear3508 commands remain0. Existing legacy/general movement APIs unchanged.
+  RR-zero regression failed59checks first, then444holdchecksO0/O2 and7first
+  handoff cases eachO0/O2 passed;5032pair checks eachnormal/reversed direction
+  eachO0/O2 pass, including overwriting stale RRcommand while fronts move.
+  Fresh Keil ARMCC5 link0errors0warnings. No flashing/board verification.
+- Restore through third stair (2026-11-01): user requests third enabled while
+  retaining fourth disabled. Move outer#if0 from second_stairs to fourth_stairs,
+  enabling second as required by sequential first->second->third flow. Fourth
+  case and its exclusive local variables remain#if0, with all targets retained.
+  Third completion enters disabled fourth/default holding without new requests.
+  Remove obsolete unused-variable casts now second locals are used. No motion
+  target/PID/steering edits; RR GM6020 remains released in current task modes.
+  120upper/pair/standby/second task runs and14first-handoff runs passedO0/O2.
+  Fresh ARMCC5 link0errors0warnings. No flashing/physical verification.
+- Restore fourth stair (2026-11-01): user requests enabling fourth as well.
+  Remove both fourth-only#if0 blocks (local variables and entire case); all
+  stairs1/2/3/4 run sequentially again. Preserve current fourth initial front
+  +/-16.2453059, finalfront+19.402660/-19.4026606, ID2+31.6812 and final
+  ID1+70.930979; completion remains fourth.status2 AFTER final ID1 arrival.
+  RR GM6020 remains released in current ChassisTask modes. Async fixture now
+  accepts user-tunable signed fourth initial targets and publishes their real
+  requested values for old-sequence progress. All66async cases eachO0/O2 pass;
+  fresh Keil ARMCC5 link0errors0warnings. No flashing/board verification.

@@ -85,6 +85,10 @@ typedef struct {
     volatile uint8_t  raw_temp;             /* ℃ */
     volatile uint32_t rx_tick;              /* 最后一帧 HAL_GetTick()，单位 ms */
     volatile uint32_t rx_count;
+    volatile uint32_t rx_max_gap_ms;       /* 相邻有效反馈的最大HAL毫秒间隔，首帧不计 */
+    volatile uint32_t rx_long_gap_count;   /* 大于50ms的间隔次数，在反馈恢复时累计 */
+    volatile uint32_t rx_last_long_gap_ms; /* 最近一次大于50ms的完整间隔 */
+    volatile uint32_t rx_resume_tick;      /* 上述长间隔后首帧的HAL时间，不代表任务恢复 */
 
     /* ---- 工程量：DjiMotor_Update() 里算 ---- */
     int32_t total_counts;                   /* 跨圈累计的转子计数 */
@@ -146,7 +150,8 @@ void DjiMotor_OnCanFrame(FDCAN_HandleTypeDef *hfdcan,
  * 并处理角度回绕。每拍调一次，调完再取角度去做位置环。 */
 void DjiMotor_Update(DjiMotor_t *motor);
 
-/* 掉线判定：用 HAL 毫秒时钟，超过 50 ms 没收到反馈就算掉线。 */
+/* 掉线判定：HAL毫秒时钟；2006试用200ms，其余型号50ms。无首帧仍视为离线。
+ * rx_long_gap_* 继续观察超过50ms的间隔，不随2006试用门槛改变。 */
 int DjiMotor_IsOnline(const DjiMotor_t *motor);
 
 /* 组帧发送。

@@ -45,7 +45,7 @@ const DjiMotor_Model_t DJI_MODEL_2006 = {
 const DjiMotor_Model_t DJI_MODEL_6020 = {
     .name       = "GM6020",
     .gear_ratio = 1.0f,                 /* 电机本体无减速箱 */
-    .cmd_max    = 30000,                /* 电压给定，不是电流给定 */
+    .cmd_max    = 25000,                /* 电压给定，不是电流给定 */
     .nm_per_raw = 0.0f,
     .feedback_base = 0x204u,
     .command_id = {0x1FFu, 0x2FFu},
@@ -54,7 +54,8 @@ const DjiMotor_Model_t DJI_MODEL_6020 = {
 
 /* ========================= 掉线判据 ========================= */
 
-#define DJI_MOTOR_TIMEOUT_MS   50u
+#define DJI_MOTOR_TIMEOUT_MS        50u  /* 其他型号及长间隔观察门槛 */
+#define DJI_MOTOR_2006_TIMEOUT_MS  200u  /* 2006反馈离线门槛：放宽对照测试 */
 
 /* ========================= ① 注册表 =========================
  * 定长数组，不是链表 —— 查找有上界，缓存友好。
@@ -128,6 +129,10 @@ DjiMotor_t *DjiMotor_Register(DjiMotor_t *motor,
     motor->raw_temp        = 0u;
     motor->rx_tick         = 0u;
     motor->rx_count        = 0u;
+    motor->rx_max_gap_ms   = 0u;
+    motor->rx_long_gap_count = 0u;
+    motor->rx_last_long_gap_ms = 0u;
+    motor->rx_resume_tick  = 0u;
     motor->total_counts    = 0;
     motor->prev_raw_angle  = 0;
     motor->angle_seeded    = 0u;
@@ -153,6 +158,7 @@ void DjiMotor_OnCanFrame(FDCAN_HandleTypeDef *hfdcan,
                          uint8_t len)
 {
     DjiMotor_t *m;
+    uint32_t now, gap;
 
     if ((data == NULL) || (len < 7u)) {
         return;                         /* 反馈帧有效长度是 7 */
@@ -168,7 +174,17 @@ void DjiMotor_OnCanFrame(FDCAN_HandleTypeDef *hfdcan,
     m->raw_temp    = data[6];
 
     /* CAN can receive before the RTOS starts; HAL time is already available. */
-    m->rx_tick  = HAL_GetTick();
+    now = HAL_GetTick();
+    if (m->rx_count != 0u) {
+        gap = now - m->rx_tick;
+        if (gap > m->rx_max_gap_ms) { m->rx_max_gap_ms = gap; }
+        if (gap > DJI_MOTOR_TIMEOUT_MS) {
+            m->rx_long_gap_count++;
+            m->rx_last_long_gap_ms = gap;
+            m->rx_resume_tick = now;
+        }
+    }
+    m->rx_tick = now;
     m->rx_count++;
 }
 
@@ -176,14 +192,19 @@ void DjiMotor_OnCanFrame(FDCAN_HandleTypeDef *hfdcan,
 
 int DjiMotor_IsOnline(const DjiMotor_t *motor)
 {
-    uint32_t last_rx_tick;
+    uint32_t last_rx_tick, now, timeout_ms;
     if ((motor == NULL) || (motor->rx_count == 0u)) {
         return 0;                       /* 一帧都没收到过 */
     }
-    /* 先取反馈时间，再取当前时间。CAN中断可能在两次读取间更新rx_tick；
-     * 若先读now再读新的rx_tick，后者可能晚1ms， unsigned减法会下溢误判掉线。 */
-    last_rx_tick = motor->rx_tick;
-    return ((uint32_t)(HAL_GetTick() - last_rx_tick) <= DJI_MOTOR_TIMEOUT_MS) ? 1 : 0;
+    timeout_ms = (motor->model == &DJI_MODEL_2006) ?
+                 DJI_MOTOR_2006_TIMEOUT_MS : DJI_MOTOR_TIMEOUT_MS;
+    /* 读取间可能被抢占，而CAN仍持续更新。若时间戳变了就重取，
+     * 避免拿过时的rx_tick算出假超时，也避免先读now造成无符号下溢。 */
+    do {
+        last_rx_tick = motor->rx_tick;
+        now = HAL_GetTick();
+    } while (last_rx_tick != motor->rx_tick);
+    return ((uint32_t)(now - last_rx_tick) <= timeout_ms) ? 1 : 0;
 }
 
 void DjiMotor_Update(DjiMotor_t *motor)

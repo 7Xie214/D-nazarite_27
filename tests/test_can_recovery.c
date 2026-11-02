@@ -9,6 +9,9 @@ FDCAN_HandleTypeDef hfdcan1, hfdcan2, hfdcan3;
 static unsigned int failures, aborts;
 static uint32_t notifications;
 static uint32_t tick = 100u;
+static FDCAN_HandleTypeDef *rx_bus;
+static unsigned int rx_size, rx_pos, rx_get_calls, deliveries, rx_fail;
+static const uint16_t rx_ids[4] = {0x201u, 0x203u, 0x204u, 0x205u};
 uint32_t HAL_GetTick(void) { return tick; }
 #define CHECK(c) do { if (!(c)) { printf("FAIL %d: %s\n", __LINE__, #c); failures++; } } while (0)
 
@@ -56,7 +59,29 @@ HAL_StatusTypeDef HAL_FDCAN_AddMessageToTxFifoQ(FDCAN_HandleTypeDef *can,
 }
 HAL_StatusTypeDef HAL_FDCAN_GetRxMessage(FDCAN_HandleTypeDef *can, uint32_t fifo,
     FDCAN_RxHeaderTypeDef *header, uint8_t *data)
-{ (void)can; (void)fifo; (void)header; (void)data; return HAL_ERROR; }
+{
+    CHECK(can == rx_bus && fifo == FDCAN_RX_FIFO0);
+    rx_get_calls++;
+    if (rx_fail != 0u || rx_pos >= rx_size) { return HAL_ERROR; }
+    memset(header, 0, sizeof(*header));
+    memset(data, 0, 8u);
+    header->Identifier = rx_ids[rx_pos];
+    header->DataLength = 8u;
+    data[0] = (uint8_t)rx_pos;
+    rx_pos++;
+    return HAL_OK;
+}
+uint32_t HAL_FDCAN_GetRxFifoFillLevel(const FDCAN_HandleTypeDef *can, uint32_t fifo)
+{
+    CHECK(can == rx_bus && fifo == FDCAN_RX_FIFO0);
+    return rx_size - rx_pos;
+}
+void BSP_CAN_OnReceive(FDCAN_HandleTypeDef *can, uint16_t id, const uint8_t *data, uint8_t len)
+{
+    CHECK(can == rx_bus && deliveries < 4u);
+    if (deliveries < 4u) { CHECK(id == rx_ids[deliveries] && data[0] == deliveries && len == 8u); }
+    deliveries++;
+}
 
 int main(void)
 {
@@ -75,6 +100,7 @@ int main(void)
         can->Init.StdFiltersNbr = 32u;
         CHECK(BSP_CAN_Init(can, &filter, 1u) == HAL_OK);
         CHECK((notifications & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != 0u);
+        CHECK((notifications & FDCAN_IT_RX_FIFO0_MESSAGE_LOST) != 0u);
         CHECK((notifications & FDCAN_IT_BUS_OFF) != 0u);
         CHECK((notifications & FDCAN_IT_ARB_PROTOCOL_ERROR) != 0u);
 
@@ -131,6 +157,35 @@ int main(void)
         CHECK(g_can_diagnostics[i].last_error_code == 5u);
         HAL_FDCAN_ErrorStatusCallback(can, FDCAN_IT_ERROR_PASSIVE);
         CHECK(aborts == i + 1u);
+        tick = 100u;
+
+        /* HAL clears RF0N before calling BSP: one interrupt must service the whole burst. */
+        rx_bus = can;
+        rx_size = 4u; rx_pos = 0u; deliveries = 0u; rx_get_calls = 0u;
+        HAL_FDCAN_RxFifo0Callback(can, FDCAN_IT_RX_FIFO0_NEW_MESSAGE);
+        CHECK(rx_pos == 4u && deliveries == 4u && rx_get_calls == 4u);
+        HAL_FDCAN_RxFifo0Callback(can, FDCAN_IT_RX_FIFO0_NEW_MESSAGE);
+        CHECK(rx_get_calls == 4u); /* Do not read an empty FIFO. */
+
+        rx_pos = 0u; deliveries = 0u; rx_get_calls = 0u;
+        HAL_FDCAN_RxFifo0Callback(can, FDCAN_IT_BUS_OFF);
+        CHECK(rx_pos == 0u && rx_get_calls == 0u);
+        tick = 200u + i;
+        HAL_FDCAN_RxFifo0Callback(can, FDCAN_IT_RX_FIFO0_MESSAGE_LOST);
+        CHECK(rx_pos == 4u && deliveries == 4u);
+        CHECK(g_can_diagnostics[i].rx_fifo0_lost_count == 1u);
+        CHECK(g_can_diagnostics[i].last_rx_loss_tick_ms == tick);
+        CHECK(g_can_diagnostics[i].last_error_code == 5u); /* Preserve protocol history. */
+
+        rx_size = 2u; rx_pos = 0u; deliveries = 0u;
+        HAL_FDCAN_RxFifo0Callback(can, FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_RX_FIFO0_MESSAGE_LOST);
+        CHECK(rx_pos == 2u && deliveries == 2u);
+        CHECK(g_can_diagnostics[i].rx_fifo0_lost_count == 2u);
+
+        rx_size = 1u; rx_pos = 0u; deliveries = 0u; rx_get_calls = 0u; rx_fail = 1u;
+        HAL_FDCAN_RxFifo0Callback(can, FDCAN_IT_RX_FIFO0_NEW_MESSAGE);
+        CHECK(rx_get_calls == 1u && deliveries == 0u && rx_pos == 0u);
+        rx_fail = 0u;
         tick = 100u;
     }
     VirtualFree(mapped, 0u, MEM_RELEASE);

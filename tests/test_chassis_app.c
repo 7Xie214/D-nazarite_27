@@ -123,8 +123,10 @@ static void tune(void)
     for (i = 0u; i < 4u; i++) {
         g_chassis_wheels[i].drive_pid.Kp = 1000.0f;
         g_chassis_wheels[i].steer_pid.pos.Kp = 1.0f;
+        g_chassis_wheels[i].steer_pid.pos.Ki = 0.0f;
         g_chassis_wheels[i].steer_pid.pos.out_max = 3.0f;
         g_chassis_wheels[i].steer_pid.spd.Kp = 1000.0f;
+        g_chassis_wheels[i].steer_pid.spd.Ki = 0.0f;
     }
 }
 
@@ -297,7 +299,7 @@ static void test_conversions_and_control(void)
     ChassisApp_Update(0.001f);
     for (i = 0u; i < 4u; i++) {
         CHECK(g_chassis_wheels[i].drive_motor->cmd == 16384);
-        CHECK(g_chassis_wheels[i].steer_motor->cmd == 30000);
+        CHECK(g_chassis_wheels[i].steer_motor->cmd == DJI_MODEL_6020.cmd_max);
     }
     frame_count = 0u;
     g_chassis_wheels[3].drive_pid.Kp = NAN;

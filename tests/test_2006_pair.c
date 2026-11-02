@@ -225,27 +225,37 @@ int main(int argc, char **argv)
         CHECK(MotorApp_Move2006Pair(75.0f) == MOTORAPP_OK);
         for (n = 0u; n < 101000u; n++) { cycle(-1); }
         CHECK(s->state == MOTORAPP_PAIR_MOVING && s->fault == MOTORAPP_PAIR_FAULT_NONE);
+    } else if (strcmp(argv[1], "gap_id3") == 0 || strcmp(argv[1], "gap_id4") == 0) {
+        int missing = strcmp(argv[1], "gap_id4") == 0 ? 3 : 4;
+        DjiMotor_t *motor = MotorApp_GetAxis((uint8_t)missing)->motor;
+        CHECK(MotorApp_Move2006Pair(2.0f) == MOTORAPP_OK);
+        for (n = 0u; n < 125u; n++) { cycle(missing); }
+        CHECK(s->state == MOTORAPP_PAIR_MOVING && s->fault == MOTORAPP_PAIR_FAULT_NONE);
+        CHECK(a3->state == AXIS_MOVING && a4->state == AXIS_MOVING);
+        cycle(-1);
+        CHECK(s->state == MOTORAPP_PAIR_MOVING && s->fault == MOTORAPP_PAIR_FAULT_NONE);
+        CHECK(motor->rx_last_long_gap_ms == 126u && motor->rx_long_gap_count == 1u);
     } else if (strcmp(argv[1], "fault") == 0 || strcmp(argv[1], "fault_id4") == 0) {
         unsigned int missed = strcmp(argv[1], "fault_id4") == 0 ? 1u : 0u;
         int16_t previous_cmd[2] = {0, 0};
         uint32_t saved_count;
         CHECK(MotorApp_Move2006Pair(2.0f) == MOTORAPP_OK);
-        for (n = 0u; n < 55u; n++) {
-            if (n == 50u) { previous_cmd[0] = g_motor_2006_2.cmd; previous_cmd[1] = g_motor_2006_1.cmd; }
+        for (n = 0u; n < 205u; n++) {
+            if (n == 200u) { previous_cmd[0] = g_motor_2006_2.cmd; previous_cmd[1] = g_motor_2006_1.cmd; }
             cycle(missed == 0u ? 4 : 3);
         }
         CHECK(s->state == MOTORAPP_PAIR_FAULT && s->fault == MOTORAPP_PAIR_FAULT_OFFLINE);
         CHECK(s->fault_motor_id == (missed == 0u ? 3u : 4u));
         CHECK(s->fault_tick_ms == tick - 4u);
         CHECK(s->timing.status == 3u && s->timing.phase == 6u);
-        CHECK(s->timing.total_ms == 51u);
-        CHECK(s->fault_rx_age_ms[missed] == 51u);
+        CHECK(s->timing.total_ms == 201u);
+        CHECK(s->fault_rx_age_ms[missed] == 201u);
         CHECK(s->fault_rx_age_ms[1u - missed] == 0u);
         CHECK(s->fault_command[0] == previous_cmd[0] && s->fault_command[1] == previous_cmd[1]);
         saved_count = s->fault_rx_count[missed];
         for (n = 0u; n < 100u; n++) { cycle(-1); }
-        CHECK(s->fault_rx_age_ms[missed] == 51u && s->fault_rx_count[missed] == saved_count);
-        CHECK(s->timing.total_ms == 51u); /* fault timing freezes with snapshot */
+        CHECK(s->fault_rx_age_ms[missed] == 201u && s->fault_rx_count[missed] == saved_count);
+        CHECK(s->timing.total_ms == 201u); /* fault timing freezes with snapshot */
         CHECK(a3->state == AXIS_FAULT && a4->state == AXIS_FAULT);
         CHECK(g_motor_2006_1.cmd == 0 && g_motor_2006_2.cmd == 0);
         CHECK(MotorApp_Move2006Pair(1.0f) == MOTORAPP_ERR_FAULT);
